@@ -2,24 +2,33 @@
 #define PEER_H
 
 
-#define HASH_LEN 16
 #define NUM_HASHES 100
+#define MAX_FILES 10 //10 for seeding and 10 for leeching?
+#define ADDRESS_LEN 16
 
-struct peer_t {
-    int id;
-    int state;
-    char[16] ipAddr;
+typedef char MD5[33];
+
+typedef struct peer_t {
+    char ipAddr[ADDRESS_LEN]; //salah darha char maert elah machi int!?
     int listeningPort;
-    char[HASH_LEN] myFiles; 
-}
+    char seededFiles[MAX_FILES];    //store only file keys  
+    char leechedFiles[MAX_FILES];   //store only file keys
+} peer_t;
 
-void initPeer();
-int requestFile(int fileID);
-int updateStatus();
+//all helpers for the tracker
+enum fileType{
+    SEEDER,
+    LEECHER,
+    NONE
+};
 
+peer_t* initPeer(char ipAddr[ADDRESS_LEN], int listeningPort);
 
+void peerAddSeed(peer_t*, MD5 fileKey); //used for anounce and update
+void peerAddLeech(peer_t*, MD5 fileKey);
 
+enum fileType peerRequestFile(peer_t*, MD5 fileKey); //used by getPeersForFile
 
-
+void freePeer(peer_t*);
 
 #endif // PEER_H
