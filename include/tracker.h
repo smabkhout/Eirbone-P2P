@@ -17,7 +17,7 @@ void removePeer(tracker_t*, peer_t*); //idk if needed (no mention in the subject
 void updatePeer(tracker_t*, peer_t*, MD5* seeded_files, MD5* leeched_files); //for the update request
 
 //will be useful for update probably (maybe for anounce?)
-file_t* addFile(tracker_t*, char filename[MAX_FILENAME], int length , MD5 key); //for the announce request
+file_t* addFile(tracker_t*, char filename[MAX_FILENAME], int length, int piece_size, MD5 key); //for the announce request
 void linkPeerToFile(tracker_t*, peer_t*, file_t*, enum fileType); //for the update request (and maybe anounce?)
 
 // getfile request

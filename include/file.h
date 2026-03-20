@@ -10,7 +10,7 @@ typedef struct file_t {
     char filename[MAX_FILENAME];
     int length; //size in bytes
     MD5 key;
-    int piece_size = 1024; //1KB pieces predefined in the subject
+    int piece_size ;//1KB pieces predefined in the subject
 } file_t;
 
 // all helpers for the tracker

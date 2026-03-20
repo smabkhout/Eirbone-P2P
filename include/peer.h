@@ -11,8 +11,8 @@ typedef char MD5[33];
 typedef struct peer_t {
     char ipAddr[ADDRESS_LEN]; //salah darha char maert elah machi int!?
     int listeningPort;
-    char seededFiles[MAX_FILES];    //store only file keys  
-    char leechedFiles[MAX_FILES];   //store only file keys
+    MD5 seededFiles[MAX_FILES];    //store only file keys  
+    MD5 leechedFiles[MAX_FILES];   //store only file keys
 } peer_t;
 
 //all helpers for the tracker
