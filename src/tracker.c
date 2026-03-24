@@ -27,21 +27,7 @@ void removePeer(tracker_t* tracker, peer_t* peer_to_remove)
     }
 }
 
-file_t* addFile(tracker_t* tracker, char filename[MAX_FILENAME], int length, int piece_size, MD5 key)
-{
-    file_t* existing = findFileByKey(tracker, key);
-    if (existing != NULL) return existing;
-
-    for (int i = 0; i < MAX_PEERS; i++){
-        if (tracker->files[i] == NULL){
-            tracker->files[i] = initFile(filename, length, key);
-            tracker->files[i]->piece_size = piece_size;
-            return tracker->files[i];
-        }
-    }
-    return NULL;
-}
-
+//REMOVE
 void linkPeerToFile(tracker_t* tracker, peer_t* peer, file_t* file, enum fileType type) {
     if (tracker == NULL || peer == NULL || file == NULL) return;
 
@@ -65,7 +51,7 @@ void linkPeerToFile(tracker_t* tracker, peer_t* peer, file_t* file, enum fileTyp
         // (Utile pour la requête "update" quand un téléchargement se termine)
         for (int i = 0; i < MAX_FILES; i++) {
             if (strcmp(peer->leechedFiles[i], file->key) == 0) {
-                peer->leechedFiles[i][0] = '\0'; // On vide la case
+                peer->leechedFiles[i][0] = NULL; // On vide la case
                 break;
             }
         }
@@ -111,9 +97,10 @@ int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, ch
             char* key_str = strtok_r(NULL, " ]", saveptr);
             
             if (length_str && piece_str && key_str) {
-                file_t* f = addFile(tracker, file_name, atoi(length_str), atoi(piece_str), key_str);
-                linkPeerToFile(tracker, current_peer, f, SEEDER);
+                file_t* f = initFile(file_name, atoi(length_str), key_str, atoi(piece_str));
+                peerAddSeed(peer_t* current_peer, file_t* f);
             } else {
+                sprintf(response_buffer, "KO: Il manque des informations pour ce fichier\n");
                 return -1; // Il manque des informations pour ce fichier
             }
         }

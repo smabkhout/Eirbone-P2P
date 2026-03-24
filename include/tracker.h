@@ -9,15 +9,13 @@
 
 typedef struct tracker_t {
     peer_t* peers[MAX_PEERS];
-    file_t* files[MAX_PEERS * MAX_FILES]; //more or less idk?
 } tracker_t;
 
 peer_t* addPeer(tracker_t*, char ipAddr[16], int port); //for the announce request
-void removePeer(tracker_t*, peer_t*); //idk if needed (no mention in the subject?) but maybe if disconnected?
+void removePeer(tracker_t*, peer_t*); 
 void updatePeer(tracker_t*, peer_t*, MD5* seeded_files, MD5* leeched_files); //for the update request
 
 //will be useful for update probably (maybe for anounce?)
-file_t* addFile(tracker_t*, char filename[MAX_FILENAME], int length, int piece_size, MD5 key); //for the announce request
 void linkPeerToFile(tracker_t*, peer_t*, file_t*, enum fileType); //for the update request (and maybe anounce?)
 
 // getfile request
