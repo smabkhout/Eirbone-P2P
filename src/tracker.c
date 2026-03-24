@@ -27,55 +27,6 @@ void removePeer(tracker_t* tracker, peer_t* peer_to_remove)
     }
 }
 
-//REMOVE
-void linkPeerToFile(tracker_t* tracker, peer_t* peer, file_t* file, enum fileType type) {
-    if (tracker == NULL || peer == NULL || file == NULL) return;
-
-    if (type == SEEDER) {
-        // 1. On vérifie s'il ne seed pas déjà ce fichier (pour éviter les doublons)
-        for (int i = 0; i < MAX_FILES; i++) {
-            if (strcmp(peer->seededFiles[i], file->key) == 0) {
-                return; // Il l'a déjà, on s'arrête
-            }
-        }
-
-        // 2. On l'ajoute dans le premier emplacement vide de ses seeders
-        for (int i = 0; i < MAX_FILES; i++) {
-            if (peer->seededFiles[i][0] == '\0') { // '\0' indique une case vide
-                strncpy(peer->seededFiles[i], file->key, 33);
-                break;
-            }
-        }
-
-        // 3. LOGIQUE MÉTIER : S'il était leecher de ce fichier, il ne l'est plus !
-        // (Utile pour la requête "update" quand un téléchargement se termine)
-        for (int i = 0; i < MAX_FILES; i++) {
-            if (strcmp(peer->leechedFiles[i], file->key) == 0) {
-                peer->leechedFiles[i][0] = NULL; // On vide la case
-                break;
-            }
-        }
-    } 
- 
-    else if (type == LEECHER) {
-        // 1. On vérifie s'il ne l'a pas déjà (en leech ou en seed)
-        for (int i = 0; i < MAX_FILES; i++) {
-            if (strcmp(peer->leechedFiles[i], file->key) == 0 || 
-                strcmp(peer->seededFiles[i], file->key) == 0) {
-                return; 
-            }
-        }
-
-        // 2. On l'ajoute dans le premier emplacement vide de ses leechers
-        for (int i = 0; i < MAX_FILES; i++) {
-            if (peer->leechedFiles[i][0] == '\0') {
-                strncpy(peer->leechedFiles[i], file->key, 33);
-                break;
-            }
-        }
-    }
-}
-
 // 1. Handler pour la commande "announce"
 int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, char* response_buffer) {
     char* listen_kw = strtok_r(NULL, " ", saveptr);
@@ -84,11 +35,11 @@ int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, ch
     if (!listen_kw || !port_str || strcmp(listen_kw, "listen") != 0) return -1;
 
     current_peer->listeningPort = atoi(port_str);
-    
+    char* file_name;
     // Traitement de la liste "seed"
     char* seed_kw = strtok_r(NULL, " [", saveptr);
     if (seed_kw && strcmp(seed_kw, "seed") == 0) {
-        char* file_name;
+
         while ((file_name = strtok_r(NULL, " ]", saveptr)) != NULL) {
             if (strcmp(file_name, "leech") == 0) break; // Fin des seeds, passage aux leechs
             
@@ -98,7 +49,7 @@ int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, ch
             
             if (length_str && piece_str && key_str) {
                 file_t* f = initFile(file_name, atoi(length_str), key_str, atoi(piece_str));
-                peerAddSeed(peer_t* current_peer, file_t* f);
+                peerAddSeed(current_peer, f);
             } else {
                 sprintf(response_buffer, "KO: Il manque des informations pour ce fichier\n");
                 return -1; // Il manque des informations pour ce fichier
@@ -106,7 +57,35 @@ int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, ch
         }
     }
     
-    // (Le traitement des "leech" viendrait ici de la même manière)
+    char* leech_kw = NULL;
+    
+    // Si la boucle "seed" s'est arrêtée avec un "break" sur le mot "leech"
+    if (file_name != NULL && strcmp(file_name, "leech") == 0) {
+        leech_kw = file_name;
+    } else {
+        // Sinon (ex: si la liste seed était vide "seed [] leech [...]")
+        leech_kw = strtok_r(NULL, " [", saveptr);
+    }
+
+    if (leech_kw != NULL && strcmp(leech_kw, "leech") == 0) {
+        char* key_str;
+        
+        // On boucle pour lire uniquement les clés MD5
+        while ((key_str = strtok_r(NULL, " ]\r\n", saveptr)) != NULL) {
+            
+            // 1. On cherche le fichier dans le réseau via sa clé
+            file_t* existing_file = findFileByKey(tracker, key_str);
+            
+            // 2. Si on le trouve, on utilise votre fonction de peer.h
+            if (existing_file != NULL) {
+                peerAddLeech(current_peer, existing_file);
+            } else {
+                // Note : Si le fichier n'existe pas, on l'ignore silencieusement 
+                // (On ne peut pas le créer car on n'a ni son nom ni sa taille)
+                printf("Log : Fichier %s inconnu ignoré en leech.\n", key_str);
+            }
+        }
+    }
 
     sprintf(response_buffer, "ok\n");
     return 0; // Succès
