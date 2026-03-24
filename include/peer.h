@@ -12,8 +12,8 @@
 typedef struct peer_t {
     char ipAddr[ADDRESS_LEN]; 
     int listeningPort;
-    file_t** seededFiles[MAX_FILES];      
-    file_t** leechedFiles[MAX_FILES];   
+    file_t* seededFiles[MAX_FILES];      
+    file_t* leechedFiles[MAX_FILES];   
 } peer_t;
 
 //all helpers for the tracker

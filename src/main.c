@@ -7,8 +7,9 @@ int main() {
     printf("=== DEBUT DU TEST DE PARSING ===\n\n");
 
     // Initialisation d'un faux environnement
-    tracker_t my_tracker;
-    peer_t my_peer;
+    tracker_t* my_tracker = malloc(sizeof(tracker_t));
+
+    peer_t *my_peer = initPeer("aaaaaaaaaaaaaaa", 2222);
     char response[256];
 
     // La commande textuelle exacte issue de l'exemple du sujet (et on y ajoute un leech pour tester la fin)
@@ -22,14 +23,13 @@ int main() {
     char* first_word = strtok_r(raw_command, " \r\n", &saveptr);
 
     if (first_word && strcmp(first_word, "announce") == 0) {
-        
-        // Appel de votre fonction
-        int status = handle_announce(&my_tracker, &my_peer, &saveptr, response);
+        int status = handle_announce(my_tracker, my_peer, &saveptr, response);
+
 
         printf("\n=== RESULTATS ===\n");
         if (status == 0) {
             printf("Statut du parsing : SUCCES (0)\n");
-            printf("Port d'écoute du pair extrait : %d\n", my_peer.listeningPort);
+            printf("Port d'écoute du pair extrait : %d\n", my_peer->listeningPort);
             printf("Buffer de réponse généré : %s", response);
         } else {
             printf("Statut du parsing : ECHEC (-1)\n");
@@ -39,6 +39,9 @@ int main() {
     } else {
         printf("Erreur : La commande n'est pas un announce.\n");
     }
+    printf("%s, %d, %d, %s,\n", my_peer->seededFiles[0]->filename, my_peer->seededFiles[0]->length, my_peer->seededFiles[0]->piece_size, my_peer->seededFiles[0]->key);
+
+
 
     return 0;
 }

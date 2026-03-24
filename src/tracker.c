@@ -70,7 +70,8 @@ int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, ch
     current_peer->listeningPort = atoi(port_str);
     char* file_name;
     // Traitement de la liste "seed"
-    char* seed_kw = strtok_r(NULL, " [", saveptr);
+    char* seed_kw = strtok_r(NULL, "[ ", saveptr);
+
     if (seed_kw && strcmp(seed_kw, "seed") == 0) {
 
         while ((file_name = strtok_r(NULL, " ]", saveptr)) != NULL) {
