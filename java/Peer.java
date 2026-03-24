@@ -25,29 +25,37 @@ public class Peer {
     public int getPort() { return port; }
     public Map<String, FileMetadata> getManagedFiles() { return managedFiles; }
 
-    public String getSeedListForTracker() {
-        StringBuilder sb = new StringBuilder("seed [");
+    private String getSeedList() {
+        StringBuilder sb = new StringBuilder("[");
         for (FileMetadata fm : managedFiles.values()) {
-            sb.append(fm.getFileName()).append(" ")
-              .append(fm.getSize()).append(" ")
-              .append("1024 ") // Taille de pièce fixée par le sujet
-              .append(fm.getHash()).append(" ");
+            if (fm.getState() == FileState.SEED) {
+                sb.append(fm.getFileName()).append(" ")
+                  .append(fm.getSize()).append(" ")
+                  .append("1024 ")
+                  .append(fm.getHash()).append(" ");
+            }
         }
-        sb.append("]");
-        return sb.toString();
+        return sb.toString().trim() + "]";
     }
 
-    public getRequestForFile(String MD5hash) {
-        StringBuilder sb = new StringBuilder("seed [");
+    private String getLeechList() {
+        StringBuilder sb = new StringBuilder("[");
         for (FileMetadata fm : managedFiles.values()) {
-            sb.append(fm.getFileName()).append(" ")
-              .append(fm.getSize()).append(" ")
-              .append("1024 ") // Taille de pièce fixée par le sujet
-              .append(fm.getHash()).append(" ");
+            if (fm.getState() == FileState.LEECH) {
+                sb.append(fm.getHash()).append(" ");
+            }
         }
-        sb.append("]");
-        return sb.toString();
+        return sb.toString().trim() + "]";
     }
+
+    public String buildAnnounceRequest() {
+        String seeds = getSeedList();
+        String leeches = getLeechList();
+        return String.format("announce listen %d seed %s leech %s\n", 
+                             this.port, seeds, leeches);
+    }
+
+    
 }
 
 
