@@ -27,6 +27,39 @@ void removePeer(tracker_t* tracker, peer_t* peer_to_remove)
     }
 }
 
+file_t* findFileByKey(tracker_t* tracker, MD5 key) {
+    if (tracker == NULL || key == NULL) return NULL;
+
+    // 1. On parcourt tous les pairs actuellement connectés au Tracker
+    for (int i = 0; i < MAX_PEERS; i++) {
+        peer_t* current_peer = tracker->peers[i];
+        
+        if (current_peer != NULL) {
+            
+            // 2. On cherche d'abord dans les fichiers qu'il possède entièrement (seeds)
+            for (int j = 0; j < MAX_FILES; j++) {
+                file_t* f = current_peer->seededFiles[j];
+                // Si la case n'est pas vide et que la clé correspond
+                if (f != NULL && strcmp(f->key, key) == 0) {
+                    return f; // On a trouvé le fichier ! On le renvoie.
+                }
+            }
+            
+            // 3. On cherche ensuite dans les fichiers qu'il télécharge (leechs)
+            for (int j = 0; j < MAX_FILES; j++) {
+                file_t* f = current_peer->leechedFiles[j];
+                // Si la case n'est pas vide et que la clé correspond
+                if (f != NULL && strcmp(f->key, key) == 0) {
+                    return f; // On a trouvé le fichier ! On le renvoie.
+                }
+            }
+        }
+    }
+
+    // Si on a fait le tour de tout le monde et qu'on n'a rien trouvé
+    return NULL; 
+}
+
 // 1. Handler pour la commande "announce"
 int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, char* response_buffer) {
     char* listen_kw = strtok_r(NULL, " ", saveptr);
