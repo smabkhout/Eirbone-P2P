@@ -24,5 +24,8 @@ peer_t** getPeersForFile(tracker_t*, file_t* file);
 
 // look request
 file_t** findFilesByCriteria(tracker_t*, char* criteria); 
+int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, char* response_buffer);
+
+
 
 #endif // TRACKER_H
