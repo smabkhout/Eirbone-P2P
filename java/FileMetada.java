@@ -10,14 +10,14 @@ public class FileMetadata {
     private final String MD5hash;
     private final long size;
     private File localPath;
-    private String bufferMap; // État des pièce (en base64)
+    private String bufferMap;
     private FileState state;
     
     public FileMetadata(String MD5hash, String path, long size, FileState state) {
         this.MD5hash = hash;
         this.localPath = new File(path);
         this.size = size;
-        this.bufferMap = ""; // À initialiser selon les pièces possédées
+        this.bufferMap = "";
         this.state = state;
     }
 

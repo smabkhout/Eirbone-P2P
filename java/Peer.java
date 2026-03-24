@@ -55,7 +55,26 @@ public class Peer {
                              this.port, seeds, leeches);
     }
 
-    
+    public String buildLookRequest(List<String> criteria) {
+        // Joint les critères avec un espace : "filename=test.bin filesize>100"
+        String joinedCriteria = String.join(" ", criteria);
+        return "look [" + joinedCriteria + "]\n";
+    }
+
+    // pour l'instant on utilise juste cette méthode et après on implémente une classe pour les critères
+    public String buildLookByNameRequest(String filename) {
+        if (filename.contains(" ")) {
+            throw new IllegalArgumentException("Le nom du fichier ne doit pas contenir d'espaces.");
+        }
+        
+        return "look [filename=" + filename + "]\n";
+    }
+
+    public String buildGetFileRequest(String key) {
+        return "getfile " + key + "\n";
+    }
+
+
 }
 
 
