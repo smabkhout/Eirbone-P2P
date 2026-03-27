@@ -14,7 +14,7 @@ typedef struct file_t {
 } file_t;
 
 // all helpers for the tracker
-file_t* initFile(char filename[MAX_FILENAME], int length, MD5 key, int piece_size);
+file_t* initFile(char* filename, int length, MD5 key, int piece_size);
 
 void freeFile(file_t*);
 
