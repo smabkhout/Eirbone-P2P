@@ -16,22 +16,23 @@ void peerAddSeed(peer_t* peer,   file_t* file){
         if (!peer->seededFiles[i]){
             peer->seededFiles[i] = malloc(sizeof(file_t));
             peer->seededFiles[i] = file;
-            break;
+            return 0;
         }
     }
+    return -1;
 }
 void peerAddLeech(peer_t* peer, file_t* file){
     for (int i=0; i<MAX_FILES; i++){
         if (!peer->leechedFiles[i]){
             peer->leechedFiles[i] = malloc(sizeof(file_t));
             peer->leechedFiles[i] = file;
-            break;
+            return 0;;
         }
     }
+    return -1;
 }
 
 enum fileType peerRequestFile(peer_t* peer, MD5 fileKey){
-    // à revoir
     for (int i=0; i<MAX_FILES; i++){
         if (peer->leechedFiles[i]->key == fileKey){
             return LEECHER;
@@ -44,7 +45,7 @@ enum fileType peerRequestFile(peer_t* peer, MD5 fileKey){
 }
 
 void freePeer(peer_t* peer){
-
+    if (peer == NULL) return;
     for (int i=0; i<MAX_FILES; i++){
         if (peer->leechedFiles[i]){
             freeFile(peer->leechedFiles[i]);
@@ -53,7 +54,7 @@ void freePeer(peer_t* peer){
             freeFile(peer->seededFiles[i]);
         }
     }
-
-    freePeer(peer);
+    free(peer);
+    peer = NULL;
 }
 
