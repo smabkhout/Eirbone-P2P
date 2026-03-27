@@ -1,27 +1,72 @@
 import java.io.*;
 import java.net.*;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class Peer {
-    private InetAddress ip;
+    private String ip;
     private int port;
     
     // Clé = Hash MD5 du fichier, Valeur = Détails (chemin, taille, pièces...)
     private Map<String, FileMetadata> managedFiles;
 
-    public Peer(InetAddress ip, int port) {
-        this.ip = ip;
+    public Peer(int port) {
+        this.ip = "127.0.0.1";
         this.port = port;
         this.managedFiles = new HashMap<>();
     }
+
+    public void startListening() {
+        new Thread(() -> {
+            try (ServerSocket serverSocket = new ServerSocket(this.port)) {
+                while (true) {
+                    Socket clientSocket = serverSocket.accept();
+                    handleIncomingConnection(clientSocket);
+                }
+            } catch (IOException e) {
+                System.err.println("\n[ERROR] Peer server listener failed on port " + this.port + ": " + e.getMessage());
+            }
+        }).start();
+    }
+
+    private void handleIncomingConnection(Socket clientSocket) {
+        new Thread(() -> {
+            try (
+                BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true)
+            ) {
+                String inputLine = in.readLine();
+                if (inputLine != null) {
+                    System.out.println("\n[INCOMING MESSAGE] from " + clientSocket.getPort() + " -> " + inputLine);
+                    
+                    if (inputLine.startsWith("ECHO")) {
+                        out.println("ECHO_REPLY for " + inputLine.substring(5));
+                    } else {
+                        out.println("ACK");
+                    }
+                }
+            } catch (IOException e) {
+                System.err.println("\nError handling incoming connection: " + e.getMessage());
+            } finally {
+                try {
+                    clientSocket.close();
+                } catch (IOException e) {
+                    // Ignore
+                }
+                // Print a new prompt so the user's CLI feels seamless after receiving a background message
+                System.out.print("> ");
+            }
+        }).start();
+    }
+    // -----------------------------------
 
     public void registerFile(String MD5hash, String path, long size) {
         FileMetadata fm = new FileMetadata(MD5hash, path, size);
         this.managedFiles.put(MD5hash, fm);
     }
 
-    public String getIpAddress() { return ip.getHostAddress(); }
+    public String getIpAddress() { return ip; }
     public int getPort() { return port; }
     public Map<String, FileMetadata> getManagedFiles() { return managedFiles; }
 
@@ -74,97 +119,21 @@ public class Peer {
         return "getfile " + key + "\n";
     }
 
-
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-public class Peer 
-{
-    x
-
-	static final int port = 8080;
-	public static void main (String[] args) throws Exception {
-	
-	Socket socket = new Socket (args [0], port) ;
-	System.out.println ("SOCKET = " + socket);
-	BufferedReader plec = new BufferedReader (
-	new InputStreamReader (socket.getInputStream () )
-	);
-	
-	PrintWriter pred = new PrintWriter (
-	new BufferedWriter (
-	new OutputStreamWriter (socket.getOutputStream () ) ),
-	true);
-	
-	String str = "bonjour";
-	
-	for (int i = 0; i < 10; i++) {
-		pred.println (str);
-		str = plec.readLine();
-	}
-	
-	System.out.println ("END");import java.io.*;
-import java.net.*;
-
-public class Client 
-{
-	static final int port = 8080;
-	public static void main (String[] args) throws Exception {
-	
-	Socket socket = new Socket (args [0], port) ;
-	System.out.println ("SOCKET = " + socket);
-	BufferedReader plec = new BufferedReader (
-	new InputStreamReader (socket.getInputStream () )
-	);
-	
-	PrintWriter pred = new PrintWriter (
-	new BufferedWriter (
-	new OutputStreamWriter (socket.getOutputStream () ) ),
-	true);
-	
-	String str = "bonjour";
-	
-	for (int i = 0; i < 10; i++) {
-		pred.println (str);
-		str = plec.readLine();
-	}
-	
-	System.out.println ("END");
-	pred. println ("END");
-	plec.close ();
-	pred.close();
-	socket.close ();
-	}
-}
-	pred. println ("END");
-	plec.close ();
-	pred.close();
-	socket.close ();
-	}
+    // envoie juste un echo pour l'instant pour verifie si les connexions marchent bien
+    public void leechFile(int targetPort, String MD5hash) {
+        try (Socket socket = new Socket("localhost", targetPort);
+             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
+            
+            String echoMessage = "ECHO " + MD5hash;
+            out.println(echoMessage);
+            System.out.println("Sent to localhost:" + targetPort + " -> " + echoMessage);
+            
+            String response = in.readLine();
+            System.out.println("Received from localhost:" + targetPort + " <- " + response);
+            
+        } catch (IOException e) {
+            System.err.println("Error connecting to localhost:" + targetPort + " - " + e.getMessage());
+        }
+    }
 }

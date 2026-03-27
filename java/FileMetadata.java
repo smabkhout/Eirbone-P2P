@@ -1,6 +1,6 @@
 import java.io.File;
 
-public enum FileState {
+enum FileState {
     SEED,
     LEECH,
     NONE
@@ -14,19 +14,23 @@ public class FileMetadata {
     private FileState state;
     
     public FileMetadata(String MD5hash, String path, long size, FileState state) {
-        this.MD5hash = hash;
+        this.MD5hash = MD5hash;
         this.localPath = new File(path);
         this.size = size;
         this.bufferMap = "";
         this.state = state;
     }
 
+    public FileMetadata(String MD5hash, String path, long size) {
+        this(MD5hash, path, size, FileState.NONE);
+    }
+
     public String getFileName() { return localPath.getName(); }
     public String getHash() { return MD5hash; }
     public long getSize() { return size; }
-    public File getlocalPath() { return localFile; }
+    public File getlocalPath() { return localPath; }
     public void setlocalPath(File file) { this.localPath = file; }
-    public void setPath(String newPath) { this.localFile = new File(newPath); }
+    public void setPath(String newPath) { this.localPath = new File(newPath); }
     public String getBufferMap() { return bufferMap; }
     public void setBufferMap(String bufferMap) { this.bufferMap = bufferMap; }
     public FileState getState() { return state; }
