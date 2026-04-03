@@ -24,12 +24,11 @@ peer_t** getPeersForFile(tracker_t*, file_t* file);
 
 // look request
 file_t** findFilesByCriteria(tracker_t*, char* criteria); 
+
+//parsers
 int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, char* response_buffer);
-void parse_look_criteria(char** saveptr, char* target_filename, int* target_filesize);
-int is_file_duplicate(file_t** found_files, int found_count, char* key);
-void search_files_in_network(tracker_t* tracker, char* target_filename, int target_filesize, file_t** found_files, int* found_count);
-void format_look_response(file_t** found_files, int found_count, char* response_buffer);
 int handle_look(tracker_t* tracker, char** saveptr, char* response_buffer);
+int handle_getfile(tracker_t* tracker, char** saveptr, char* response_buffer);
 
 
 
