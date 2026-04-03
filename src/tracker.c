@@ -222,3 +222,49 @@ int handle_look(tracker_t* tracker, char** saveptr, char* response_buffer) {
 
     return 0; 
 }
+
+
+int handle_getfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
+    // 1. Extraction de la clé MD5 envoyée par le client
+    char* key_str = strtok_r(NULL, " \r\n", saveptr);
+    
+    // Si la commande est mal formatée (il manque la clé)
+    if (key_str == NULL) return -1; 
+
+    // 2. Préparation du début de la réponse (ex: "peers 8905e92a... [")
+    sprintf(response_buffer, "peers %s [", key_str);
+    
+    int first_peer_added = 1; // Un petit drapeau pour gérer proprement les espaces entre les IPs
+
+    // 3. On parcourt tout le réseau (tous les pairs du Tracker)
+    for (int i = 0; i < MAX_PEERS; i++) {
+        peer_t* current_peer = tracker->peers[i];
+        
+        // Si la case du tableau contient bien un pair
+        if (current_peer != NULL) {
+            
+            // On demande à notre fonction outil si ce pair a le fichier
+            if (peerRequestFile(current_peer, key_str) != NONE) {
+                
+                // On ajoute un espace avant l'IP, SAUF si c'est le tout premier de la liste
+                if (!first_peer_added) {
+                    strcat(response_buffer, " ");
+                }
+                
+                // On formate les infos du pair sous la forme "IP:Port" (ex: "1.1.1.2:2222")
+                char peer_info[64];
+                sprintf(peer_info, "%s:%d", current_peer->ipAddr, current_peer->listeningPort);
+                
+                // On colle ces infos dans le grand buffer de réponse
+                strcat(response_buffer, peer_info);
+                
+                first_peer_added = 0; // Le premier pair est passé
+            }
+        }
+    }
+
+    // 4. On ferme la liste avec le crochet et on ajoute le retour à la ligne obligatoire
+    strcat(response_buffer, "]\n");
+    
+    return 0; // Succès
+}

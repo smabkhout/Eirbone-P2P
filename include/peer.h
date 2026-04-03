@@ -25,8 +25,8 @@ enum fileType{
 
 peer_t* initPeer(char* ipAddr, int listeningPort);
 
-void peerAddSeed(peer_t*,   file_t* file); //used for anounce and update
-void peerAddLeech(peer_t*, file_t* file);
+int peerAddSeed(peer_t*,   file_t* file); //used for anounce and update
+int peerAddLeech(peer_t*, file_t* file);
 
 enum fileType peerRequestFile(peer_t*, MD5 fileKey); //used by getPeersForFile
 
