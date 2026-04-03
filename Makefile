@@ -3,8 +3,8 @@
 c:
 	mkdir -p build
 	sed -E 's/[[:space:]]*\[cite:[^]]*\]//g' tracker.c > build/tracker.clean.c
-	gcc -Iinclude -Wno-error=return-mismatch build/tracker.clean.c -o tracker_server
-	gcc -Iinclude -Wno-error=return-mismatch src/main.c src/file.c src/peer.c src/tracker.c -o tracker_demo
+	gcc -Iinclude build/tracker.clean.c -o tracker_server
+	gcc -Iinclude src/main.c src/file.c src/peer.c src/tracker.c -o tracker_demo
 
 java:
 	mkdir -p java/bin
