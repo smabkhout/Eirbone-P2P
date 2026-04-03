@@ -38,11 +38,19 @@ public class Peer {
             ) {
                 String inputLine = in.readLine();
                 if (inputLine != null) {
-                    System.out.println("\n[INCOMING MESSAGE] from " + clientSocket.getPort() + " -> " + inputLine);
-                    
                     if (inputLine.startsWith("ECHO")) {
-                        out.println("ECHO_REPLY for " + inputLine.substring(5));
+                        String[] parts = inputLine.split(" ", 3);
+                        if (parts.length >= 3) {
+                            String senderPort = parts[1];
+                            String hash = parts[2];
+                            System.out.println("\n[P2P MESSAGE] ECHO received from Peer explicitly listening on port " + senderPort + " | Requested hash: " + hash);
+                            out.println("ECHO_REPLY for " + hash);
+                        } else {
+                            System.out.println("\n[P2P MESSAGE] Received malformed ECHO: " + inputLine);
+                            out.println("ECHO_REPLY (malformed)");
+                        }
                     } else {
+                        System.out.println("\n[P2P MESSAGE] -> " + inputLine);
                         out.println("ACK");
                     }
                 }
@@ -59,7 +67,6 @@ public class Peer {
             }
         }).start();
     }
-    // -----------------------------------
 
     public void registerFile(String MD5hash, String path, long size) {
         FileMetadata fm = new FileMetadata(MD5hash, path, size);
@@ -125,7 +132,7 @@ public class Peer {
              PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
              BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()))) {
             
-            String echoMessage = "ECHO " + MD5hash;
+            String echoMessage = "ECHO " + this.port + " " + MD5hash;
             out.println(echoMessage);
             System.out.println("Sent to localhost:" + targetPort + " -> " + echoMessage);
             
