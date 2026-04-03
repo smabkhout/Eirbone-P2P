@@ -205,7 +205,6 @@ int handle_look(tracker_t* tracker, char** saveptr, char* response_buffer) {
 
 
 int handle_getfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
-<<<<<<< HEAD
     char* key_str = strtok_r(NULL, " \r\n", saveptr);
     
     if (key_str == NULL) return -1; 
@@ -214,19 +213,6 @@ int handle_getfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
     
     int first_peer_added = 1;
 
-=======
-
-    char* key_str = strtok_r(NULL, " \r\n", saveptr);
-    
-
-    if (key_str == NULL) return -1; 
-
-    
-    sprintf(response_buffer, "peers %s [", key_str);
-    
-    int first_peer_added = 1; 
-    
->>>>>>> refs/remotes/origin/master
     for (int i = 0; i < MAX_PEERS; i++) {
         peer_t* current_peer = tracker->peers[i];
         
@@ -247,8 +233,6 @@ int handle_getfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
             }
         }
     }
-
-    strcat(response_buffer, "]\n");
-    
+    strcat(response_buffer, "]\n");  
     return 0;
 }
