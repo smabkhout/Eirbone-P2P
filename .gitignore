@@ -1,2 +1,10 @@
 *.o
 *.class
+
+# Build folders
+build/
+java/bin/
+
+# Generated binaries
+tracker_server
+tracker_demo
