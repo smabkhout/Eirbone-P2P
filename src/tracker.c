@@ -225,18 +225,17 @@ int handle_look(tracker_t* tracker, char** saveptr, char* response_buffer) {
 
 
 int handle_getfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
-    // 1. Extraction de la clé MD5 envoyée par le client
+
     char* key_str = strtok_r(NULL, " \r\n", saveptr);
     
-    // Si la commande est mal formatée (il manque la clé)
+
     if (key_str == NULL) return -1; 
 
-    // 2. Préparation du début de la réponse (ex: "peers 8905e92a... [")
+    
     sprintf(response_buffer, "peers %s [", key_str);
     
-    int first_peer_added = 1; // Un petit drapeau pour gérer proprement les espaces entre les IPs
-
-    // 3. On parcourt tout le réseau (tous les pairs du Tracker)
+    int first_peer_added = 1; 
+    
     for (int i = 0; i < MAX_PEERS; i++) {
         peer_t* current_peer = tracker->peers[i];
         
