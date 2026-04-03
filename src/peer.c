@@ -1,5 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
+
 #include "../include/peer.h"
 
 
@@ -8,14 +10,19 @@ peer_t* initPeer(char* ipAddr, int listeningPort){
     p->listeningPort = listeningPort;
     strncpy(p->ipAddr, ipAddr, ADDRESS_LEN-1);
     p->ipAddr[ADDRESS_LEN-1] = '\0';
+    for (int i = 0; i<MAX_FILES; i++){
+        p->seededFiles[i] = NULL;
+        p->leechedFiles[i] = NULL;
+    }
     return p;
 }
 
 int peerAddSeed(peer_t* peer,   file_t* file){
     for (int i=0; i<MAX_FILES; i++){
         if (!peer->seededFiles[i]){
-            peer->seededFiles[i] = malloc(sizeof(file_t));
+            //peer->seededFiles[i] = malloc(sizeof(file_t));
             peer->seededFiles[i] = file;
+            printf("bonbon\n");
             return 0 ;
         }
     }
@@ -24,21 +31,31 @@ int peerAddSeed(peer_t* peer,   file_t* file){
 int peerAddLeech(peer_t* peer, file_t* file){
     for (int i=0; i<MAX_FILES; i++){
         if (!peer->leechedFiles[i]){
-            peer->leechedFiles[i] = malloc(sizeof(file_t));
+            //peer->leechedFiles[i] = malloc(sizeof(file_t));
             peer->leechedFiles[i] = file;
+            printf("bonbon\n");
+
             return 0;
         }
     }
     return -1;
 }
 
-enum fileType peerRequestFile(peer_t* peer, MD5 fileKey){
-    for (int i=0; i<MAX_FILES; i++){
-        if (peer->leechedFiles[i]->key == fileKey){
-            return LEECHER;
+enum fileType peerRequestFile(peer_t* peer, MD5 fileKey) {
+    if (peer == NULL || fileKey == NULL) return NONE;
+
+    for (int i = 0; i < MAX_FILES; i++) {
+        
+        if (peer->leechedFiles[i] != NULL) {
+            if (strcmp(peer->leechedFiles[i]->key, fileKey) == 0) {
+                return LEECHER;
+            }
         }
-        if (peer->seededFiles[i]->key == fileKey){
-            return SEEDER;
+        
+        if (peer->seededFiles[i] != NULL) {
+            if (strcmp(peer->seededFiles[i]->key, fileKey) == 0) {
+                return SEEDER;
+            }
         }
     }
     return NONE;
