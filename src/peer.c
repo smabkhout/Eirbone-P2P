@@ -34,7 +34,6 @@ int peerAddLeech(peer_t* peer, file_t* file){
         if (!peer->leechedFiles[i]){
             peer->leechedFiles[i] = malloc(sizeof(file_t));
             peer->leechedFiles[i] = file;
-            printf("bonbon\n");
 
             return 0;
         }
