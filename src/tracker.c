@@ -31,37 +31,32 @@ int removePeer(tracker_t* tracker, peer_t* peer_to_remove)
 file_t* findFileByKey(tracker_t* tracker, MD5 key) {
     if (tracker == NULL || key == NULL) return NULL;
 
-    // 1. On parcourt tous les pairs actuellement connectés au Tracker
     for (int i = 0; i < MAX_PEERS; i++) {
         peer_t* current_peer = tracker->peers[i];
         
         if (current_peer != NULL) {
             
-            // 2. On cherche d'abord dans les fichiers qu'il possède entièrement (seeds)
             for (int j = 0; j < MAX_FILES; j++) {
                 file_t* f = current_peer->seededFiles[j];
-                // Si la case n'est pas vide et que la clé correspond
+
                 if (f != NULL && strcmp(f->key, key) == 0) {
-                    return f; // On a trouvé le fichier ! On le renvoie.
+                    return f; 
                 }
             }
             
-            // 3. On cherche ensuite dans les fichiers qu'il télécharge (leechs)
             for (int j = 0; j < MAX_FILES; j++) {
                 file_t* f = current_peer->leechedFiles[j];
-                // Si la case n'est pas vide et que la clé correspond
+
                 if (f != NULL && strcmp(f->key, key) == 0) {
-                    return f; // On a trouvé le fichier ! On le renvoie.
+                    return f;
                 }
             }
         }
     }
 
-    // Si on a fait le tour de tout le monde et qu'on n'a rien trouvé
     return NULL; 
 }
 
-// 1. Handler pour la commande "announce"
 int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, char* response_buffer) {
     char* listen_kw = strtok_r(NULL, " ", saveptr);
     char* port_str = strtok_r(NULL, " ", saveptr);
@@ -70,7 +65,7 @@ int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, ch
 
     current_peer->listeningPort = atoi(port_str);
     char* file_name;
-    // Traitement de la liste "seed"
+
     char* seed_kw = strtok_r(NULL, " ", saveptr);
 
     if (seed_kw && strcmp(seed_kw, "seed") == 0) {
@@ -87,36 +82,35 @@ int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, ch
                 peerAddSeed(current_peer, f);
             } else {
                 sprintf(response_buffer, "KO: Il manque des informations pour ce fichier\n");
-                return -1; // Il manque des informations pour ce fichier
+                return -1;
             }
         }
     }
     
     char* leech_kw = NULL;
     
-    // Si la boucle "seed" s'est arrêtée avec un "break" sur le mot "leech"
+
     if (file_name != NULL && strcmp(file_name, "leech") == 0) {
         leech_kw = file_name;
     } else {
-        // Sinon (ex: si la liste seed était vide "seed [] leech [...]")
+
         leech_kw = strtok_r(NULL, " [", saveptr);
     }
 
     if (leech_kw != NULL && strcmp(leech_kw, "leech") == 0) {
         char* key_str;
         
-        // On boucle pour lire uniquement les clés MD5
+
         while ((key_str = strtok_r(NULL, " ]\r\n", saveptr)) != NULL) {
             
-            // 1. On cherche le fichier dans le réseau via sa clé
+
             file_t* existing_file = findFileByKey(tracker, key_str);
             
-            // 2. Si on le trouve, on utilise votre fonction de peer.h
+
             if (existing_file != NULL) {
                 peerAddLeech(current_peer, existing_file);
             } else {
-                // Note : Si le fichier n'existe pas, on l'ignore silencieusement 
-                // (On ne peut pas le créer car on n'a ni son nom ni sa taille)
+
                 printf("Log : Fichier %s inconnu ignoré en leech.\n", key_str);
             }
         }
@@ -126,29 +120,27 @@ int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, ch
     return 0; // Succès
 }
 
-void parse_look_criteria(char** saveptr, char* target_filename, int* target_filesize) {
+static void parse_look_criteria(char** saveptr, char* target_filename, int* target_filesize) {
     char* criterion;
     while ((criterion = strtok_r(NULL, " []\r\n", saveptr)) != NULL) {
         if (strncmp(criterion, "filename=", 9) == 0) {
             strncpy(target_filename, criterion + 9, MAX_FILENAME - 1);
         } else if (strncmp(criterion, "filesize>", 9) == 0) {
-            *target_filesize = atoi(criterion + 9); // On modifie la valeur pointée
+            *target_filesize = atoi(criterion + 9);
         }
     }
 }
 
-// Helper 2 : Vérifie si un fichier est déjà dans notre liste de résultats
-int is_file_duplicate(file_t** found_files, int found_count, char* key) {
+static int is_file_duplicate(file_t** found_files, int found_count, char* key) {
     for (int k = 0; k < found_count; k++) {
         if (strcmp(found_files[k]->key, key) == 0) {
-            return 1; // C'est un doublon
+            return 1;
         }
     }
-    return 0; // Ce n'est pas un doublon
+    return 0; 
 }
 
-// Helper 3 : Parcourt tout le réseau pour trouver les fichiers qui matchent
-void search_files_in_network(tracker_t* tracker, char* target_filename, int target_filesize, file_t** found_files, int* found_count) {
+static void search_files_in_network(tracker_t* tracker, char* target_filename, int target_filesize, file_t** found_files, int* found_count) {
     for (int i = 0; i < MAX_PEERS; i++) {
         peer_t* current_peer = tracker->peers[i];
         if (current_peer == NULL) continue;
@@ -162,16 +154,14 @@ void search_files_in_network(tracker_t* tracker, char* target_filename, int targ
                 file_t* f = current_list[j];
                 if (f == NULL) continue;
 
-                // Test des critères
                 int match = 1;
                 if (target_filename[0] != '\0' && strcmp(f->filename, target_filename) != 0) match = 0;
                 if (target_filesize != -1 && f->length <= target_filesize) match = 0;
 
-                // Ajout si ça matche et que ce n'est pas un doublon
                 if (match && !is_file_duplicate(found_files, *found_count, f->key)) {
                     if (*found_count < 100) {
                         found_files[*found_count] = f;
-                        (*found_count)++; // On incrémente le compteur
+                        (*found_count)++;
                     }
                 }
             }
@@ -179,8 +169,7 @@ void search_files_in_network(tracker_t* tracker, char* target_filename, int targ
     }
 }
 
-// Helper 4 : Transforme les objets fichiers trouvés en texte pour le réseau
-void format_look_response(file_t** found_files, int found_count, char* response_buffer) {
+static void format_look_response(file_t** found_files, int found_count, char* response_buffer) {
     strcpy(response_buffer, "list [");
     
     for (int i = 0; i < found_count; i++) {
@@ -193,7 +182,7 @@ void format_look_response(file_t** found_files, int found_count, char* response_
         
         strcat(response_buffer, file_info);
         if (i < found_count - 1) {
-            strcat(response_buffer, " "); // Espace entre les fichiers
+            strcat(response_buffer, " "); 
         }
     }
     
@@ -201,23 +190,14 @@ void format_look_response(file_t** found_files, int found_count, char* response_
 }
 
 int handle_look(tracker_t* tracker, char** saveptr, char* response_buffer) {
-    // 1. Initialisation des variables de recherche
     char target_filename[MAX_FILENAME] = {0};
     int target_filesize = -1;
     
-    // 2. Variables pour stocker les résultats
     file_t* found_files[100];
     int found_count = 0;
 
-    
-    
-    // Etape 1 : Lire les critères
     parse_look_criteria(saveptr, target_filename, &target_filesize);
-
-    // Etape 2 : Chercher dans le réseau
     search_files_in_network(tracker, target_filename, target_filesize, found_files, &found_count);
-
-    // Etape 3 : Créer la réponse
     format_look_response(found_files, found_count, response_buffer);
 
     return 0; 
