@@ -79,8 +79,10 @@ int main(int argc, char *argv[]){
             }
         }
 
-        int ready = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-        if (ready < 0) { perror("select"); break; }
+        if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+            perror("select");
+            break;
+        }
 
         if (FD_ISSET(server_fd, &read_fds)) {
             struct sockaddr_in cl_addr;
