@@ -8,3 +8,13 @@ java/bin/
 # Generated binaries
 tracker_server
 tracker_demo
+
+# LaTeX generated files
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.pdf
