@@ -5,7 +5,7 @@
 #include "../include/peer.h"
 
 
-peer_t* initPeer(char* ipAddr, int listeningPort){
+peer_t* initPeer(const char* ipAddr, int listeningPort){
     struct peer_t* p = malloc(sizeof(struct peer_t));
     p->listeningPort = listeningPort;
     strncpy(p->ipAddr, ipAddr, ADDRESS_LEN-1);
@@ -21,7 +21,6 @@ int peerAddSeed(peer_t* peer,   file_t* file){
     for (int i=0; i<MAX_FILES; i++){
         if (!peer->seededFiles[i]){
             peer->seededFiles[i] = file;
-            printf("bonbon\n");
             return 0 ;
         }
     }

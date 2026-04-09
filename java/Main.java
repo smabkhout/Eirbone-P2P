@@ -15,6 +15,13 @@ public class Main {
 
             Peer peer = new Peer(autoPort);
             peer.startListening();
+            peer.registerFile(
+                "8905e92afeb80fc7722ec89eb0bf0966",
+                "/tmp/file_a.dat",
+                2097152
+            );
+            peer.connectToTracker("127.0.0.1", 12345);
+
 
             System.out.println("\nPeer initialized successfully!");
             System.out.println("IP: " + peer.getIpAddress());
@@ -23,8 +30,12 @@ public class Main {
             System.out.println("=========================================");
 
             Scanner scanner = new Scanner(System.in);
-            System.out.println("Type 'echo <port> <hash>' to test leechFile connection (e.g. 'echo 8081 abcdef123').");
+            //System.out.println("Type 'echo <port> <hash>' to test leechFile connection (e.g. 'echo 8081 abcdef123').");
+            System.out.println("Commands:");
+            System.out.println("  look <filename>: search for a file on the tracker");
+            System.out.println("  getfile <key>: get peers for a file");
             System.out.println("Type 'exit' or 'q' to quit.");
+            
 
             while (true) {
                 System.out.print("> ");
@@ -42,7 +53,14 @@ public class Main {
                         System.out.println("Invalid port number.");
                         scanner.nextLine();
                     }
-                } else {
+                }
+                // } else if ("look".equalsIgnoreCase(input)) {
+                //     String filename = scanner.next();
+                //     peer.sendLook(filename);         // to implement next
+                // } else if ("getfile".equalsIgnoreCase(input)) {
+                //     String key = scanner.next();
+                //     peer.sendGetFile(key);           // to implement next
+                else {
                     System.out.println("Unknown command: " + input);
                 }
             }

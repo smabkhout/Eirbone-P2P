@@ -28,7 +28,7 @@ void freeTracker(tracker_t* tracker){
 }
 
 
-peer_t* addPeer(tracker_t* tracker, char ipAddr[ADDRESS_LEN], int port)
+peer_t* addPeer(tracker_t* tracker, const char* ipAddr, int port)
 {
     for (int i = 0; i < MAX_PEERS; i++){
         if (tracker->peers[i] == NULL){
@@ -69,10 +69,14 @@ static file_t* findFileByKey(tracker_t* tracker, MD5 key) {
     return NULL; 
 }
 
-static int parseSeedList(tracker_t* tracker, peer_t* peer, char *filename, char **saveptr, char* response_buffer){
+static int parseSeedList(tracker_t* tracker, peer_t* peer, char **filename, char **saveptr, char* response_buffer){
 
-    while ((filename = strtok_r(NULL, " []]", saveptr)) != NULL) {
-        if (strcmp(filename, "leech") == 0) break; 
+    char *tmp_filename;
+    while ((tmp_filename = strtok_r(NULL, " []]", saveptr)) != NULL) {
+        if (strcmp(tmp_filename, "leech") == 0) {
+            *filename = tmp_filename;
+            break; 
+        }
             
         char* length_str = strtok_r(NULL, " []\r\n", saveptr);
         char* piece_str  = strtok_r(NULL, " []\r\n", saveptr);
@@ -80,7 +84,7 @@ static int parseSeedList(tracker_t* tracker, peer_t* peer, char *filename, char 
             
         if (length_str && piece_str && key_str) {
             if (!findFileByKey(tracker, key_str)) {
-                file_t* f = initFile(filename, atoi(length_str), key_str, atoi(piece_str));
+                file_t* f = initFile(tmp_filename, atoi(length_str), key_str, atoi(piece_str));
                 peerAddSeed(peer, f);
             } else {
                 printf("Log : Fichier %s déjà connu ignoré en seed.\n", key_str);
@@ -95,7 +99,7 @@ static int parseSeedList(tracker_t* tracker, peer_t* peer, char *filename, char 
 
 static int parseLeechList(tracker_t* tracker, peer_t* peer, char **saveptr){
     char *key_str;
-    while ((key_str = strtok_r(NULL, " ]\r\n", saveptr)) != NULL) {
+    while ((key_str = strtok_r(NULL, " []\r\n", saveptr)) != NULL) {
         file_t* existing_file = findFileByKey(tracker, key_str);
         if (existing_file != NULL) {
             peerAddLeech(peer, existing_file);
@@ -113,10 +117,10 @@ int handleAnnounce(tracker_t* tracker, peer_t* current_peer, char** saveptr, cha
     if (!listen_kw || !port_str || strcmp(listen_kw, "listen") != 0) return -1;
 
     current_peer->listeningPort = atoi(port_str);
-    char* file_name;
+    char* file_name = NULL;
     char* seed_kw = strtok_r(NULL, " ", saveptr);
     if (seed_kw && strcmp(seed_kw, "seed") == 0) {
-        if (parseSeedList(tracker, current_peer, file_name, saveptr, response_buffer) != 0) {
+        if (parseSeedList(tracker, current_peer, &file_name, saveptr, response_buffer) != 0) {
             return -1; 
         }
     }
@@ -133,7 +137,7 @@ int handleAnnounce(tracker_t* tracker, peer_t* current_peer, char** saveptr, cha
         }   
     }
     sprintf(response_buffer, "ok\n");
-    return 0; // Succès
+    return 0;
 }
 
 static void parseLookCriteria(char** saveptr, char* target_filename, int* target_filesize) {

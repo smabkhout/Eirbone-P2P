@@ -22,7 +22,7 @@ enum fileType{
     NONE
 };
 
-peer_t* initPeer(char* ipAddr, int listeningPort);
+peer_t* initPeer(const char* ipAddr, int listeningPort);
 
 int peerAddSeed(peer_t*,   file_t* file); //used for anounce and update
 int peerAddLeech(peer_t*, file_t* file);

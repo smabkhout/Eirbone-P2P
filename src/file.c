@@ -2,7 +2,7 @@
 #include <string.h>
 #include "../include/file.h"
 
-file_t* initFile(char filename[MAX_FILENAME], int length, MD5 key, int piece_size) {
+file_t* initFile(char* filename, int length, MD5 key, int piece_size) {
     file_t* new_file = (file_t*)malloc(sizeof(file_t));
     if (new_file == NULL) return NULL;
     strncpy(new_file->filename, filename, MAX_FILENAME - 1);

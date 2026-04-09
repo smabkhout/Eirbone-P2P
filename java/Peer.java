@@ -7,6 +7,11 @@ import java.util.Map;
 public class Peer {
     private String ip;
     private int port;
+
+    //for the connection
+    private Socket trackerSocket;
+    private PrintWriter trackerOut;
+    private BufferedReader trackerIn;
     
     // Clé = Hash MD5 du fichier, Valeur = Détails (chemin, taille, pièces...)
     private Map<String, FileMetadata> managedFiles;
@@ -141,6 +146,33 @@ public class Peer {
             
         } catch (IOException e) {
             System.err.println("Error connecting to localhost:" + targetPort + " - " + e.getMessage());
+        }
+    }
+
+    public void connectToTracker(String trackerIp, int trackerPort) {
+        try {
+            trackerSocket = new Socket(trackerIp, trackerPort);
+            trackerOut = new PrintWriter(trackerSocket.getOutputStream(), true);
+            trackerIn  = new BufferedReader(new InputStreamReader(trackerSocket.getInputStream()));
+        } catch (IOException e) {
+            System.err.println("Could not connect to tracker: " + e.getMessage());
+            return;
+        }
+
+        String announce = buildAnnounceRequest();
+        trackerOut.print(announce);
+        trackerOut.flush();
+        System.out.println("Sent to tracker: " + announce);
+
+        try {
+            String response = trackerIn.readLine();
+            if ("ok".equals(response.trim())) {
+                System.out.println("Tracker acknowledged announce!");
+            } else {
+                System.err.println("Unexpected tracker response: " + response);
+            }
+        } catch (IOException e) {
+            System.err.println("Error reading tracker response: " + e.getMessage());
         }
     }
 }

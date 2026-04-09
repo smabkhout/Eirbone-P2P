@@ -14,7 +14,7 @@ typedef struct tracker_t {
 tracker_t* initTracker();
 void freeTracker(tracker_t*);
 
-peer_t* addPeer(tracker_t*, char ipAddr[ADDRESS_LEN], int port); //for the announce request
+peer_t* addPeer(tracker_t*, const char* ipAddr, int port); //for the announce request
 int removePeer(tracker_t*, peer_t*); 
 
 //parsers
