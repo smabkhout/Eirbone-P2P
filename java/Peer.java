@@ -73,8 +73,9 @@ public class Peer {
         }).start();
     }
 
-    public void registerFile(String MD5hash, String path, long size) {
+    public void registerFile(String MD5hash, String path, long size, FileState state) {
         FileMetadata fm = new FileMetadata(MD5hash, path, size);
+        fm.setState(state);
         this.managedFiles.put(MD5hash, fm);
     }
 
@@ -173,6 +174,28 @@ public class Peer {
             }
         } catch (IOException e) {
             System.err.println("Error reading tracker response: " + e.getMessage());
+        }
+    }
+
+    public void sendLook(String filename) {
+        try {
+            trackerOut.print(buildLookByNameRequest(filename));
+            trackerOut.flush();
+            String response = trackerIn.readLine();
+            System.out.println("Tracker response: " + response);
+        } catch (IOException e) {
+            System.err.println("Error during look: " + e.getMessage());
+        }
+    }
+
+    public void sendGetFile(String key) {
+        try {
+            trackerOut.print(buildGetFileRequest(key));
+            trackerOut.flush();
+            String response = trackerIn.readLine();
+            System.out.println("Tracker response: " + response);
+        } catch (IOException e) {
+            System.err.println("Error during getfile: " + e.getMessage());
         }
     }
 }

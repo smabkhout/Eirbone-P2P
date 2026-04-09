@@ -16,12 +16,19 @@ void error(const char *msg){
 
 int main(int argc, char *argv[]){
 
+
+
     tracker_t* tracker = initTracker();
 
     if (argc < 2){
         fprintf(stderr, "ERROR, no port provided\n");
         exit(1);
     }
+
+    printf("=========================================\n"
+            "     Welcome to Eirbone Application      \n"
+           "=========================================\n");
+           
     int server_fd;
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
         error("ERROR opening socket");
@@ -50,20 +57,35 @@ int main(int argc, char *argv[]){
         printf("Client connected: %s\n", ip);
         peer_t* client_peer = addPeer(tracker, ip, 0); //port 0 for now
 
-        
         char buffer[512];
-        recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-        char* saveptr;
-        char* cmd = strtok_r(buffer, " \r\n", &saveptr);
+        while(1) {   
+            memset(buffer, 0, sizeof(buffer));
+             
+            int b = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+            if (b <= 0) {
+                printf("Client disconnected: %s\n", ip);
+                close(client_fd);
+                break;
+            }
 
-        char answer[512];
-    
-        if (strcmp(cmd, "announce") == 0)
-            handleAnnounce(tracker, client_peer, &saveptr,  answer);
+            char* saveptr;
+            char* cmd = strtok_r(buffer, " \r\n", &saveptr);
+
+            char answer[512];
         
-        send(client_fd, answer, strlen(answer), 0);
-        close(client_fd);
+            if (strcmp(cmd, "announce") == 0)
+                handleAnnounce(tracker, client_peer, &saveptr,  answer);
+            else if (strcmp(cmd, "look")     == 0) 
+                handleLook(tracker, &saveptr, answer);
+            else if (strcmp(cmd, "getfile")  == 0) 
+                handleGetfile(tracker, &saveptr, answer);
+            // else if (strcmp(cmd, "update")   == 0) 
+            //     handleUpdate(tracker, client_peer, &saveptr, answer);
+            
+            send(client_fd, answer, strlen(answer), 0);
+            memset(answer, 0, sizeof(answer));
         }
-
+        
     return 1;
+    }
 }
