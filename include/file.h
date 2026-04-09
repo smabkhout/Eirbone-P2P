@@ -2,9 +2,9 @@
 #define FILE_H
 
 #define MAX_FILENAME 64
-#define KEY_LEN 16
+#define MD5_LEN 33
 
-typedef char MD5[33]; //the hashes in the subject are 32 chars long + '\0' so 33?
+typedef char MD5[MD5_LEN]; //the hashes in the subject are 32 chars long + '\0' so 33?
 
 typedef struct file_t {
     char filename[MAX_FILENAME];

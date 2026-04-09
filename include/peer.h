@@ -4,7 +4,6 @@
 #include "file.h"
 
 
-#define NUM_HASHES 100
 #define MAX_FILES 10 
 #define ADDRESS_LEN 16
 

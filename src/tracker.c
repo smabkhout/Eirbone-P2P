@@ -4,7 +4,31 @@
 #include "../include/tracker.h"
 
 
-peer_t* addPeer(tracker_t* tracker, char ipAddr[16], int port)
+tracker_t* initTracker(){
+    tracker_t* tracker = malloc(sizeof(tracker_t));
+    if (tracker == NULL) {
+        fprintf(stderr, "Erreur d'allocation pour le tracker\n");
+        return NULL;
+    }
+    for (int i = 0; i < MAX_PEERS; i++){
+        tracker->peers[i] = NULL;
+    }
+    return tracker;
+}
+
+void freeTracker(tracker_t* tracker){
+    if (tracker == NULL) return;
+    for (int i = 0; i < MAX_PEERS; i++){
+        if (tracker->peers[i] != NULL){
+            freePeer(tracker->peers[i]);
+            tracker->peers[i] = NULL;
+        }
+    }
+    free(tracker);
+}
+
+
+peer_t* addPeer(tracker_t* tracker, char ipAddr[ADDRESS_LEN], int port)
 {
     for (int i = 0; i < MAX_PEERS; i++){
         if (tracker->peers[i] == NULL){
@@ -28,36 +52,61 @@ int removePeer(tracker_t* tracker, peer_t* peer_to_remove)
     return -1;
 }
 
-file_t* findFileByKey(tracker_t* tracker, MD5 key) {
+static file_t* findFileByKey(tracker_t* tracker, MD5 key) {
     if (tracker == NULL || key == NULL) return NULL;
-
     for (int i = 0; i < MAX_PEERS; i++) {
-        peer_t* current_peer = tracker->peers[i];
-        
-        if (current_peer != NULL) {
-            
-            for (int j = 0; j < MAX_FILES; j++) {
-                file_t* f = current_peer->seededFiles[j];
-
-                if (f != NULL && strcmp(f->key, key) == 0) {
-                    return f; 
-                }
-            }
-            
-            for (int j = 0; j < MAX_FILES; j++) {
-                file_t* f = current_peer->leechedFiles[j];
-
-                if (f != NULL && strcmp(f->key, key) == 0) {
-                    return f;
+        peer_t* current_peer = tracker->peers[i];        
+        if (current_peer != NULL) {   
+            file_t** lists[2] = { current_peer->seededFiles, current_peer->leechedFiles };         
+            for (int l = 0; l < 2; l++){
+                for (int j = 0; j < MAX_FILES; j++){
+                    if (lists[l][j] != NULL && strcmp(lists[l][j]->key, key) == 0)
+                        return lists[l][j];
                 }
             }
         }
     }
-
     return NULL; 
 }
 
-int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, char* response_buffer) {
+static int parseSeedList(tracker_t* tracker, peer_t* peer, char *filename, char **saveptr, char* response_buffer){
+
+    while ((filename = strtok_r(NULL, " []]", saveptr)) != NULL) {
+        if (strcmp(filename, "leech") == 0) break; 
+            
+        char* length_str = strtok_r(NULL, " []\r\n", saveptr);
+        char* piece_str  = strtok_r(NULL, " []\r\n", saveptr);
+        char* key_str    = strtok_r(NULL, " []\r\n", saveptr);
+            
+        if (length_str && piece_str && key_str) {
+            if (!findFileByKey(tracker, key_str)) {
+                file_t* f = initFile(filename, atoi(length_str), key_str, atoi(piece_str));
+                peerAddSeed(peer, f);
+            } else {
+                printf("Log : Fichier %s déjà connu ignoré en seed.\n", key_str);
+            }                
+        } else {
+            sprintf(response_buffer, "KO: Il manque des informations pour ce fichier\n");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int parseLeechList(tracker_t* tracker, peer_t* peer, char **saveptr){
+    char *key_str;
+    while ((key_str = strtok_r(NULL, " ]\r\n", saveptr)) != NULL) {
+        file_t* existing_file = findFileByKey(tracker, key_str);
+        if (existing_file != NULL) {
+            peerAddLeech(peer, existing_file);
+        } else {
+            printf("Log: Fichier %s inconnu ignoré en leech.\n", key_str);
+        }
+    }
+    return 0;
+}
+
+int handleAnnounce(tracker_t* tracker, peer_t* current_peer, char** saveptr, char* response_buffer) {
     char* listen_kw = strtok_r(NULL, " ", saveptr);
     char* port_str = strtok_r(NULL, " ", saveptr);
     
@@ -65,62 +114,29 @@ int handle_announce(tracker_t* tracker, peer_t* current_peer, char** saveptr, ch
 
     current_peer->listeningPort = atoi(port_str);
     char* file_name;
-
     char* seed_kw = strtok_r(NULL, " ", saveptr);
-
     if (seed_kw && strcmp(seed_kw, "seed") == 0) {
-
-        while ((file_name = strtok_r(NULL, " []]", saveptr)) != NULL) {
-            if (strcmp(file_name, "leech") == 0) break; 
-            
-            char* length_str = strtok_r(NULL, " []\r\n", saveptr);
-            char* piece_str  = strtok_r(NULL, " []\r\n", saveptr);
-            char* key_str    = strtok_r(NULL, " []\r\n", saveptr);
-            
-            if (length_str && piece_str && key_str) {
-                file_t* f = initFile(file_name, atoi(length_str), key_str, atoi(piece_str));
-                peerAddSeed(current_peer, f);
-            } else {
-                sprintf(response_buffer, "KO: Il manque des informations pour ce fichier\n");
-                return -1;
-            }
+        if (parseSeedList(tracker, current_peer, file_name, saveptr, response_buffer) != 0) {
+            return -1; 
         }
     }
     
     char* leech_kw = NULL;
-    
-
-    if (file_name != NULL && strcmp(file_name, "leech") == 0) {
+    if (file_name && strcmp(file_name, "leech") == 0) {
         leech_kw = file_name;
     } else {
-
         leech_kw = strtok_r(NULL, " [", saveptr);
     }
-
     if (leech_kw != NULL && strcmp(leech_kw, "leech") == 0) {
-        char* key_str;
-        
-
-        while ((key_str = strtok_r(NULL, " ]\r\n", saveptr)) != NULL) {
-            
-
-            file_t* existing_file = findFileByKey(tracker, key_str);
-            
-
-            if (existing_file != NULL) {
-                peerAddLeech(current_peer, existing_file);
-            } else {
-
-                printf("Log : Fichier %s inconnu ignoré en leech.\n", key_str);
-            }
-        }
+        if (parseLeechList(tracker, current_peer, saveptr) != 0) {
+            return -1; 
+        }   
     }
-
     sprintf(response_buffer, "ok\n");
     return 0; // Succès
 }
 
-static void parse_look_criteria(char** saveptr, char* target_filename, int* target_filesize) {
+static void parseLookCriteria(char** saveptr, char* target_filename, int* target_filesize) {
     char* criterion;
     while ((criterion = strtok_r(NULL, " []\r\n", saveptr)) != NULL) {
         if (strncmp(criterion, "filename=", 9) == 0) {
@@ -131,7 +147,7 @@ static void parse_look_criteria(char** saveptr, char* target_filename, int* targ
     }
 }
 
-static int is_file_duplicate(file_t** found_files, int found_count, char* key) {
+static int isFileDuplicate(file_t** found_files, int found_count, char* key) {
     for (int k = 0; k < found_count; k++) {
         if (strcmp(found_files[k]->key, key) == 0) {
             return 1;
@@ -140,7 +156,15 @@ static int is_file_duplicate(file_t** found_files, int found_count, char* key) {
     return 0; 
 }
 
-static void search_files_in_network(tracker_t* tracker, char* target_filename, int target_filesize, file_t** found_files, int* found_count) {
+static int fileMatchesCriteria(file_t* f, char* target_filename, int target_filesize) {
+    if (target_filename[0] != '\0' && strcmp(f->filename, target_filename) != 0) 
+        return 0;
+    if (target_filesize != -1 && f->length <= target_filesize) 
+        return 0;
+    return 1;
+}
+
+static void searchFilesInNetwork(tracker_t* tracker, char* target_filename, int target_filesize, file_t** found_files, int* found_count) {
     for (int i = 0; i < MAX_PEERS; i++) {
         peer_t* current_peer = tracker->peers[i];
         if (current_peer == NULL) continue;
@@ -153,12 +177,8 @@ static void search_files_in_network(tracker_t* tracker, char* target_filename, i
             for (int j = 0; j < MAX_FILES; j++) {
                 file_t* f = current_list[j];
                 if (f == NULL) continue;
-
-                int match = 1;
-                if (target_filename[0] != '\0' && strcmp(f->filename, target_filename) != 0) match = 0;
-                if (target_filesize != -1 && f->length <= target_filesize) match = 0;
-
-                if (match && !is_file_duplicate(found_files, *found_count, f->key)) {
+                if (fileMatchesCriteria(f, target_filename, target_filesize) && 
+                        !isFileDuplicate(found_files, *found_count, f->key)) {
                     if (*found_count < 100) {
                         found_files[*found_count] = f;
                         (*found_count)++;
@@ -169,7 +189,7 @@ static void search_files_in_network(tracker_t* tracker, char* target_filename, i
     }
 }
 
-static void format_look_response(file_t** found_files, int found_count, char* response_buffer) {
+static void formatLookResponse(file_t** found_files, int found_count, char* response_buffer) {
     strcpy(response_buffer, "list [");
     
     for (int i = 0; i < found_count; i++) {
@@ -189,22 +209,22 @@ static void format_look_response(file_t** found_files, int found_count, char* re
     strcat(response_buffer, "]\n");
 }
 
-int handle_look(tracker_t* tracker, char** saveptr, char* response_buffer) {
+int handleLook(tracker_t* tracker, char** saveptr, char* response_buffer) {
     char target_filename[MAX_FILENAME] = {0};
     int target_filesize = -1;
     
     file_t* found_files[100];
     int found_count = 0;
 
-    parse_look_criteria(saveptr, target_filename, &target_filesize);
-    search_files_in_network(tracker, target_filename, target_filesize, found_files, &found_count);
-    format_look_response(found_files, found_count, response_buffer);
+    parseLookCriteria(saveptr, target_filename, &target_filesize);
+    searchFilesInNetwork(tracker, target_filename, target_filesize, found_files, &found_count);
+    formatLookResponse(found_files, found_count, response_buffer);
 
     return 0; 
 }
 
 
-int handle_getfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
+int handleGetfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
     char* key_str = strtok_r(NULL, " \r\n", saveptr);
     
     if (key_str == NULL) return -1; 

@@ -20,7 +20,6 @@ peer_t* initPeer(char* ipAddr, int listeningPort){
 int peerAddSeed(peer_t* peer,   file_t* file){
     for (int i=0; i<MAX_FILES; i++){
         if (!peer->seededFiles[i]){
-            peer->seededFiles[i] = malloc(sizeof(file_t));
             peer->seededFiles[i] = file;
             printf("bonbon\n");
             return 0 ;
@@ -32,7 +31,6 @@ int peerAddSeed(peer_t* peer,   file_t* file){
 int peerAddLeech(peer_t* peer, file_t* file){
     for (int i=0; i<MAX_FILES; i++){
         if (!peer->leechedFiles[i]){
-            peer->leechedFiles[i] = malloc(sizeof(file_t));
             peer->leechedFiles[i] = file;
 
             return 0;
@@ -72,5 +70,4 @@ void freePeer(peer_t* peer){
         }
     }
     free(peer);
-    peer = NULL;
 }
