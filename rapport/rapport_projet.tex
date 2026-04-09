@@ -1,0 +1,133 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\geometry{margin=2cm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage{enumitem}
+\begin{document}
+
+\begin{titlepage}
+    \centering
+    \vspace*{1cm}
+    
+    {\Huge \textbf{Rapport intermédiaire : Eirbone}} \\[0.5cm]
+    {\Large Application d’échange de gros fichiers en Pair à Pair (P2P)} \\[1.5cm]
+
+    \IfFileExists{img/enseirb.png}{
+      \includegraphics[width=0.4\textwidth]{img/enseirb.png} \\[2cm]
+    }{\IfFileExists{rapport/img/enseirb.png}{
+      \includegraphics[width=0.4\textwidth]{rapport/img/enseirb.png} \\[2cm]
+    }{
+      \vspace{2cm}
+    }}
+
+    \textbf{Auteurs :} \\
+    MABKHOUT Salah-Eddine \\
+    MIGAOU Mohamed Aziz \\ 
+    BENBAKI Anas \\
+    DAMMOU Adam \\[1.5cm]
+
+    \textbf{Date :} \today \\[2cm]
+    
+    \LARGE \textbf{ENSEIRB-MATMECA} \\[1.5cm]
+
+    \vfill
+    {\large Année 2025-2026}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+
+Ce rapport présente uniquement ce que nous avons effectivement implémenté dans le projet. L’architecture réalisée est composée de deux blocs : un tracker en C et un peer en Java, reliés par un protocole texte sur TCP. Nous avons privilégié une implémentation progressive, avec des composants simples, testables et cohérents entre eux.\\
+
+Les points livrés dans cette version sont :
+\begin{itemize}[leftmargin=1.2cm]
+  \item un tracker capable d’enregistrer les peers et de répondre aux requêtes ;
+  \item un peer Java capable d’annoncer ses fichiers et d’interroger le tracker ;
+  \item une communication C/Java stable sur les commandes principales.
+\end{itemize}
+
+\section{Notre implémentation en C (Tracker)}
+
+La partie C est organisée en trois modules principaux pour garder un code clair :
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{file} : définition d’un fichier partagé (nom, taille, MD5, taille de pièce) ;
+  \item \texttt{peer} : état d’un pair (IP, port d’écoute, listes seed/leech) ;
+  \item \texttt{tracker} : table des peers et handlers des commandes.
+\end{itemize}
+
+\vspace{0.5em}
+Concrètement, le tracker maintient un tableau de peers et met à jour cet état à chaque requête reçue. Le serveur en \texttt{main.c} ouvre une socket TCP, accepte les connexions, lit une commande, appelle le handler correspondant puis renvoie une réponse texte.
+
+\subsection{Fonctionnalités implémentées côté tracker}
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{announce} : enregistrement du peer, de son port d’écoute et de ses listes seed/leech ;
+  \item \texttt{look} : recherche de fichiers par critères (ex. nom, taille), avec format de réponse normalisé ;
+  \item \texttt{getfile} : recherche des peers qui possèdent une clé MD5 donnée.
+\end{itemize}
+
+\vspace{0.5em}
+Dans \texttt{handleLook}, nous appliquons les critères puis nous dédupliquons les résultats par clé MD5 afin d’éviter des doublons dans la réponse. Dans \texttt{handleGetfile}, nous parcourons les peers connus et nous retournons uniquement ceux qui possèdent le fichier demandé.\\
+
+Nous avons aussi intégré des tests unitaires côté C sur les handlers principaux. Cela nous a permis de valider rapidement le comportement de \texttt{announce}, \texttt{look} et \texttt{getfile} pendant les itérations.
+
+\section{Notre implémentation en Java (Peer)}
+
+La partie Java est organisée autour de quatre classes :
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{FileMetadata} : métadonnées locales d’un fichier (hash, taille, chemin, état) ;
+  \item \texttt{Peer} : logique réseau principale ;
+  \item \texttt{PeerDiscovery} : parsing des réponses \texttt{peers [...]} ;
+  \item \texttt{Main} : exécution et commandes utilisateur.
+\end{itemize}
+
+\subsection{Fonctionnalités implémentées côté peer}
+
+Dans \texttt{Peer}, nous maintenons une map de fichiers gérés par hash MD5. Lors de l’initialisation, le peer ouvre un port local, démarre son écouteur, construit son message \texttt{announce} et se connecte au tracker.\\
+
+Dans \texttt{Peer}, nous avons implémenté deux flux :
+\begin{itemize}[leftmargin=1.2cm]
+  \item flux tracker : connexion TCP, \texttt{announce}, \texttt{look}, \texttt{getfile} ;
+  \item flux peer-to-peer : écoute locale via \texttt{ServerSocket}.
+\end{itemize}
+
+\vspace{0.5em}
+Pour la partie peer-to-peer, nous avons implémenté un échange \texttt{ECHO} de validation. Cela confirme que le canal direct entre peers fonctionne, que les connexions entrantes sont traitées, et que le peer peut répondre à une requête simple.\\
+
+L’interface CLI dans \texttt{Main} permet d’exécuter rapidement les scénarios de base : \texttt{look <filename>} et \texttt{getfile <key>}. Ce choix rend les tests manuels rapides et reproductibles.
+
+\section{Connexion entre la partie C et la partie Java}
+
+La connexion entre C et Java est réalisée via une socket TCP, avec un protocole texte simple : une commande par ligne et une réponse normalisée. Ce choix garantit une intégration lisible, facile à tester, et stable dans les deux sens.\\
+
+Dans notre implémentation, l’échange validé de bout en bout est le suivant :
+\begin{itemize}[leftmargin=1.2cm]
+  \item le peer Java ouvre une connexion vers le tracker C ;
+  \item il envoie \texttt{announce} et reçoit \texttt{ok} ;
+  \item il envoie ensuite \texttt{look} pour rechercher un fichier ;
+  \item il envoie \texttt{getfile} pour obtenir les peers sources ;
+  \item enfin, il peut initier un contact peer-to-peer de test.
+\end{itemize}
+
+\vspace{0.5em}
+Ce flux montre que le contrat protocolaire est cohérent : les commandes envoyées par Java sont correctement interprétées côté C, et les réponses du tracker sont exploitables côté Java.
+
+\section{Prochaines étapes}
+
+Pour satisfaire pleinement le sujet, les développements prioritaires restants sont :
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item finaliser le protocole Pair--Tracker, notamment \texttt{update} périodique et connexions TCP persistantes ;
+  \item implémenter le protocole Pair--Pair complet : \texttt{interested}/\texttt{have}, \texttt{getpieces}/\texttt{data} et buffermap Base64 ;
+  \item appliquer rigoureusement le \textit{message framing} (header texte + payload binaire) avec pièces de 1024 octets ;
+  \item renforcer la robustesse d’exécution : gestion des erreurs de format, déconnexions voisines et configuration via \texttt{config.ini} ;
+  \item compléter l’observabilité et la validation : logs, indicateurs de progression/débit et tests d’intégration multi-peers.
+\end{itemize}
+
+\end{document}
