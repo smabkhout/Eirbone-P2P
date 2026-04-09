@@ -8,6 +8,7 @@ java/bin/
 # Generated binaries
 tracker_server
 tracker_demo
+tracker
 
 # LaTeX generated files
 *.aux

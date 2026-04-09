@@ -115,8 +115,31 @@ Dans notre implémentation, l’échange validé de bout en bout est le suivant 
   \item enfin, il peut initier un contact peer-to-peer de test.
 \end{itemize}
 
+
 \vspace{0.5em}
-Ce flux montre que le contrat protocolaire est cohérent : les commandes envoyées par Java sont correctement interprétées côté C, et les réponses du tracker sont exploitables côté Java.
+Ce flux est cohérent et respecte les principes de la connexion \textit{tracker-to-peer} : les commandes envoyées par Java sont correctement interprétées côté C, et les réponses du tracker sont exploitables côté Java.
+
+\subsection{Gestion des connexions multiples : \texttt{select()}}
+
+Le serveur tracker utilise le mécanisme de multiplexage d'entrées/sorties \texttt{select()} 
+pour gérer plusieurs peers connectés simultanément au sein d'un seul thread, conformément 
+aux recommandations du sujet.
+
+À chaque itération de la boucle principale, le tracker reconstruit un ensemble de descripteurs (\texttt{fd\_set}) comprenant le socket serveur et tous les sockets clients actifs. \texttt{select()} bloque jusqu'à ce qu'une activité soit détectée sur l'un d'eux :
+
+\begin{itemize}
+    \item \textbf{Activité sur le socket serveur} $\rightarrow$ nouvelle
+    connexion: \texttt{accept()} puis création du peer dans la table du tracker ;
+
+    \item \textbf{Activité sur un socket client} $\rightarrow$ message entrant:
+    lecture, délégue le message vers le handler correspondant et envoie la réponse ;
+
+    \item \textbf{\texttt{recv()} retourne 0 ou $-1$} $\rightarrow$
+    déconnexion : libération du slot et suppression du peer.
+\end{itemize}
+
+Ce choix évite la création d'un thread par client c qui nous évitera des problèmes de 
+synchronisation et de concurrence.
 
 \section{Prochaines étapes}
 
