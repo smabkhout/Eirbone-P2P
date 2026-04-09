@@ -21,7 +21,7 @@ public class Main {
                 2097152,
                 FileState.SEED
             );
-            peer.connectToTracker("127.0.0.1", 12345);
+            peer.connectToTracker("127.0.0.1", 12345); //we should use the tracker's ip (from args)
 
 
             System.out.println("\nPeer initialized successfully!");

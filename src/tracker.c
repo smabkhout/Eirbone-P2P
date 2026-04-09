@@ -83,11 +83,13 @@ static int parseSeedList(tracker_t* tracker, peer_t* peer, char **filename, char
         char* key_str    = strtok_r(NULL, " []\r\n", saveptr);
             
         if (length_str && piece_str && key_str) {
-            if (!findFileByKey(tracker, key_str)) {
+            file_t* exists = findFileByKey(tracker, key_str);
+            if (!exists) {
                 file_t* f = initFile(tmp_filename, atoi(length_str), key_str, atoi(piece_str));
                 peerAddSeed(peer, f);
             } else {
-                printf("Log : Fichier %s déjà connu ignoré en seed.\n", key_str);
+                peerAddSeed(peer, exists);
+                printf("Fichier %s déjà connu ignoré en seed.\n", key_str);
             }                
         } else {
             sprintf(response_buffer, "KO: Il manque des informations pour ce fichier\n");
@@ -137,6 +139,7 @@ int handleAnnounce(tracker_t* tracker, peer_t* current_peer, char** saveptr, cha
         }   
     }
     sprintf(response_buffer, "ok\n");
+    printf("[ANNOUNCE] Peer %s:%d announced\n", current_peer->ipAddr, current_peer->listeningPort);
     return 0;
 }
 
@@ -224,6 +227,8 @@ int handleLook(tracker_t* tracker, char** saveptr, char* response_buffer) {
     searchFilesInNetwork(tracker, target_filename, target_filesize, found_files, &found_count);
     formatLookResponse(found_files, found_count, response_buffer);
 
+    printf("[LOOK] criteria: filename=%s filesize>%d: %d result(s)\n", target_filename, target_filesize, found_count);
+
     return 0; 
 }
 
@@ -236,6 +241,7 @@ int handleGetfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
     sprintf(response_buffer, "peers %s [", key_str);
     
     int first_peer_added = 1;
+    int peer_count = 0;
 
     for (int i = 0; i < MAX_PEERS; i++) {
         peer_t* current_peer = tracker->peers[i];
@@ -243,6 +249,7 @@ int handleGetfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
         if (current_peer != NULL) {
             
             if (peerRequestFile(current_peer, key_str) != NONE) {
+                peer_count++;
                 
                 if (!first_peer_added) {
                     strcat(response_buffer, " ");
@@ -258,5 +265,8 @@ int handleGetfile(tracker_t* tracker, char** saveptr, char* response_buffer) {
         }
     }
     strcat(response_buffer, "]\n");  
+
+    printf("[GETFILE] key=%s: %d peer(s) found\n", key_str, peer_count);
+
     return 0;
 }

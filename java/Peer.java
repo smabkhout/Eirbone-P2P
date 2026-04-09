@@ -17,7 +17,11 @@ public class Peer {
     private Map<String, FileMetadata> managedFiles;
 
     public Peer(int port) {
-        this.ip = "127.0.0.1";
+        try {
+        this.ip = InetAddress.getLocalHost().getHostAddress();
+        } catch (UnknownHostException e) {
+            this.ip = "127.0.0.1";
+        }
         this.port = port;
         this.managedFiles = new HashMap<>();
     }
@@ -182,6 +186,10 @@ public class Peer {
             trackerOut.print(buildLookByNameRequest(filename));
             trackerOut.flush();
             String response = trackerIn.readLine();
+            if (response == null) {
+                System.err.println("[WARNING] Tracker disconnected.");
+                return;
+            }
             System.out.println("Tracker response: " + response);
         } catch (IOException e) {
             System.err.println("Error during look: " + e.getMessage());
@@ -193,6 +201,10 @@ public class Peer {
             trackerOut.print(buildGetFileRequest(key));
             trackerOut.flush();
             String response = trackerIn.readLine();
+            if (response == null) {
+                System.err.println("[WARNING] Tracker disconnected.");
+                return;
+            }
             System.out.println("Tracker response: " + response);
         } catch (IOException e) {
             System.err.println("Error during getfile: " + e.getMessage());
