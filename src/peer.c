@@ -18,9 +18,14 @@ peer_t* initPeer(const char* ipAddr, int listeningPort){
 }
 
 int peerAddSeed(peer_t* peer,   file_t* file){
+    if (peer == NULL || file == NULL) return -1;
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (peer->seededFiles[i] == file) return 0;
+    }
     for (int i=0; i<MAX_FILES; i++){
         if (!peer->seededFiles[i]){
             peer->seededFiles[i] = file;
+            fileRetain(file);
             return 0 ;
         }
     }
@@ -28,9 +33,14 @@ int peerAddSeed(peer_t* peer,   file_t* file){
 }
 
 int peerAddLeech(peer_t* peer, file_t* file){
+    if (peer == NULL || file == NULL) return -1;
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (peer->leechedFiles[i] == file) return 0;
+    }
     for (int i=0; i<MAX_FILES; i++){
         if (!peer->leechedFiles[i]){
             peer->leechedFiles[i] = file;
+            fileRetain(file);
 
             return 0;
         }
@@ -60,13 +70,42 @@ enum fileType peerRequestFile(peer_t* peer, MD5 fileKey) {
 
 void freePeer(peer_t* peer){
     if (peer == NULL) return;
+
+    file_t* unique_files[MAX_FILES * 2];
+    int unique_count = 0;
+
     for (int i=0; i<MAX_FILES; i++){
         if (peer->leechedFiles[i]){
-            freeFile(peer->leechedFiles[i]);
+            int seen = 0;
+            for (int j = 0; j < unique_count; j++) {
+                if (unique_files[j] == peer->leechedFiles[i]) {
+                    seen = 1;
+                    break;
+                }
+            }
+            if (!seen) {
+                unique_files[unique_count++] = peer->leechedFiles[i];
+            }
+            peer->leechedFiles[i] = NULL;
         }
         if (peer->seededFiles[i]){
-            freeFile(peer->seededFiles[i]);
+            int seen = 0;
+            for (int j = 0; j < unique_count; j++) {
+                if (unique_files[j] == peer->seededFiles[i]) {
+                    seen = 1;
+                    break;
+                }
+            }
+            if (!seen) {
+                unique_files[unique_count++] = peer->seededFiles[i];
+            }
+            peer->seededFiles[i] = NULL;
         }
     }
+
+    for (int i = 0; i < unique_count; i++) {
+        fileRelease(unique_files[i]);
+    }
+
     free(peer);
 }

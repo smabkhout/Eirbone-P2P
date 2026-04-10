@@ -11,6 +11,7 @@
 #include "tracker.h"
 
 #define BUFFER_SIZE 512
+#define CLIENT_INBUF_SIZE 4096
 
 void error(const char *msg){
     perror(msg);
@@ -34,7 +35,13 @@ int main(int argc, char *argv[]){
 
 
     int client_fds[MAX_PEERS];
-    for (int i = 0; i < MAX_PEERS; i++) client_fds[i] = -1;
+    char client_inbuf[MAX_PEERS][CLIENT_INBUF_SIZE];
+    size_t client_inbuf_len[MAX_PEERS];
+    for (int i = 0; i < MAX_PEERS; i++) {
+        client_fds[i] = -1;
+        client_inbuf[i][0] = '\0';
+        client_inbuf_len[i] = 0;
+    }
 
     int server_fd;
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) 
@@ -103,6 +110,8 @@ int main(int argc, char *argv[]){
             } else {
                 client_fds[slot] = client_fd;
                 tracker->peers[slot] = initPeer(ip, 0);
+                client_inbuf[slot][0] = '\0';
+                client_inbuf_len[slot] = 0;
                 printf("[CONNECT] %s assigned to slot %d\n", ip, slot);
             }
         }
@@ -112,36 +121,78 @@ int main(int argc, char *argv[]){
             if (!FD_ISSET(client_fds[i], &read_fds)) continue; 
 
             memset(buffer, 0, sizeof(buffer));
-             
             int b = recv(client_fds[i], buffer, sizeof(buffer) - 1, 0);
             if (b <= 0) {
-                printf("[DISCONNECT] slot %d (%s)\n", i, tracker->peers[i]->ipAddr);
-                removePeer(tracker, tracker->peers[i]);
+                if (tracker->peers[i] != NULL) {
+                    printf("[DISCONNECT] slot %d (%s)\n", i, tracker->peers[i]->ipAddr);
+                    removePeer(tracker, tracker->peers[i]);
+                } else {
+                    printf("[DISCONNECT] slot %d (unknown)\n", i);
+                }
                 close(client_fds[i]);
                 client_fds[i] = -1;
+                client_inbuf[i][0] = '\0';
+                client_inbuf_len[i] = 0;
                 continue;
             }
 
-            char* saveptr;
-            char* cmd = strtok_r(buffer, " \r\n", &saveptr);
-
-            if (cmd == NULL) continue;
-        
-            if (strcmp(cmd, "announce") == 0)
-                handleAnnounce(tracker, tracker->peers[i], &saveptr,  answer);
-            else if (strcmp(cmd, "look")     == 0) 
-                handleLook(tracker, &saveptr, answer);
-            else if (strcmp(cmd, "getfile")  == 0) 
-                handleGetfile(tracker, &saveptr, answer);
-            // else if (strcmp(cmd, "update")   == 0) 
-            //     handleUpdate(tracker, client_peer, &saveptr, answer);
-            else {
-                sprintf(answer, "error unknown command\n");
-                printf("[ERROR] Unknown command from %s: %s\n", tracker->peers[i]->ipAddr, cmd);
+            if (client_inbuf_len[i] + (size_t)b >= CLIENT_INBUF_SIZE) {
+                printf("[ERROR] Input buffer overflow for slot %d, resetting buffer\n", i);
+                client_inbuf_len[i] = 0;
+                client_inbuf[i][0] = '\0';
             }
-            
-            send(client_fds[i], answer, strlen(answer), 0);
-            memset(answer, 0, sizeof(answer));
+
+            memcpy(client_inbuf[i] + client_inbuf_len[i], buffer, (size_t)b);
+            client_inbuf_len[i] += (size_t)b;
+            client_inbuf[i][client_inbuf_len[i]] = '\0';
+
+            char* line_start = client_inbuf[i];
+            char* newline;
+            while ((newline = strchr(line_start, '\n')) != NULL) {
+                *newline = '\0';
+
+                if (*line_start == '\0') {
+                    line_start = newline + 1;
+                    continue;
+                }
+
+                memset(answer, 0, sizeof(answer));
+
+                char* saveptr;
+                char* cmd = strtok_r(line_start, " \r\n", &saveptr);
+
+                if (cmd == NULL) {
+                    line_start = newline + 1;
+                    continue;
+                }
+
+                if (strcmp(cmd, "announce") == 0)
+                    handleAnnounce(tracker, tracker->peers[i], &saveptr,  answer);
+                else if (strcmp(cmd, "look")     == 0)
+                    handleLook(tracker, &saveptr, answer);
+                else if (strcmp(cmd, "getfile")  == 0)
+                    handleGetfile(tracker, &saveptr, answer);
+                // else if (strcmp(cmd, "update")   == 0)
+                //     handleUpdate(tracker, tracker->peers[i], &saveptr, answer);
+                else {
+                    sprintf(answer, "error unknown command\n");
+                    if (tracker->peers[i] != NULL) {
+                        printf("[ERROR] Unknown command from %s: %s\n", tracker->peers[i]->ipAddr, cmd);
+                    }
+                }
+
+                if (answer[0] != '\0') {
+                    send(client_fds[i], answer, strlen(answer), 0);
+                }
+
+                line_start = newline + 1;
+            }
+
+            size_t remaining = strlen(line_start);
+            if (line_start != client_inbuf[i]) {
+                memmove(client_inbuf[i], line_start, remaining + 1);
+            }
+            client_inbuf_len[i] = remaining;
         }
     }
     freeTracker(tracker);
