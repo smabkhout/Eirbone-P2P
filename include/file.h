@@ -11,11 +11,14 @@ typedef struct file_t {
     int length; //size in bytes
     MD5 key;
     int piece_size ;//1KB pieces predefined in the subject
+    int ref_count;
 } file_t;
 
 // all helpers for the tracker
 file_t* initFile(char* filename, int length, MD5 key, int piece_size);
 
 void freeFile(file_t*);
+void fileRetain(file_t*);
+void fileRelease(file_t*);
 
 #endif // FILE_H
