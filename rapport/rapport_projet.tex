@@ -50,7 +50,7 @@ Les points livrés dans cette version sont :
 \begin{itemize}[leftmargin=1.2cm]
   \item un tracker capable d’enregistrer les peers et de répondre aux requêtes ;
   \item un peer Java capable d’annoncer ses fichiers et d’interroger le tracker ;
-  \item une communication C/Java stable sur les commandes principales.
+  \item une communication Pair-Pair fonctionnelle.
 \end{itemize}
 
 \section{Notre implémentation en C (Tracker)}
@@ -92,20 +92,29 @@ La partie Java est organisée autour de quatre classes :
 
 Dans \texttt{Peer}, nous maintenons une map de fichiers gérés par hash MD5. Lors de l’initialisation, le peer ouvre un port local, démarre son écouteur, construit son message \texttt{announce} et se connecte au tracker.\\
 
-Dans \texttt{Peer}, nous avons implémenté deux flux :
+Dans \texttt{Peer}, nous distinguons deux flux de communication complémentaires :
 \begin{itemize}[leftmargin=1.2cm]
-  \item flux tracker : connexion TCP, \texttt{announce}, \texttt{look}, \texttt{getfile} ;
-  \item flux peer-to-peer : écoute locale via \texttt{ServerSocket}.
+  \item \texttt{flux Pair-Tracker} : une connexion TCP vers le tracker central, utilisée pour les messages de signalisation \texttt{announce}, \texttt{look} et \texttt{getfile} ;
+  \item \texttt{flux Pair-Pair} : une écoute locale via \texttt{ServerSocket} pour accepter les connexions entrantes d'autres peers et traiter les requêtes de disponibilité et de transfert de pièces.
 \end{itemize}
 
 \vspace{0.5em}
-Pour la partie peer-to-peer, nous avons implémenté un échange \texttt{ECHO} de validation. Cela confirme que le canal direct entre peers fonctionne, que les connexions entrantes sont traitées, et que le peer peut répondre à une requête simple.\\
+Pour la partie peer-to-peer, nous avons implémenté le protocole demandé :
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{interested <key>} $\rightarrow$ \texttt{have <key> <buffermapBase64>} ;
+  \item \texttt{getpieces <key> [idx...]} $\rightarrow$ \texttt{data <key> [idx len ...]} + payload binaire.
+\end{itemize}
 
-L’interface CLI dans \texttt{Main} permet d’exécuter rapidement les scénarios de base : \texttt{look <filename>} et \texttt{getfile <key>}. Ce choix rend les tests manuels rapides et reproductibles.
+\vspace{0.5em}
+La taille de pièce est fixée à 1024 octets, le buffermap est encodé en Base64, et la réponse \texttt{data} suit le schéma header texte + données binaires.\\
+
+Au lancement, le peer peut être initialisé avec un fichier seed passé en argument ; sa clé MD5 est calculée automatiquement si elle n’est pas fournie.\\
+
+Un test Java dédié (\texttt{PeerProtocolTest}) valide aussi les échanges \texttt{interested/have} et \texttt{getpieces/data} entre deux instances de peers distinctes.
 
 \section{Connexion entre la partie C et la partie Java}
 
-La connexion entre C et Java est réalisée via une socket TCP, avec un protocole texte simple : une commande par ligne et une réponse normalisée. Ce choix garantit une intégration lisible, facile à tester, et stable dans les deux sens.\\
+La connexion entre C et Java (flux Pair--Tracker) est réalisée via une socket TCP, avec un protocole texte simple : une commande par ligne et une réponse normalisée. Les échanges Pair--Pair conservent le même principe pour le header, puis ajoutent une payload binaire pour \texttt{data}.\\
 
 Dans notre implémentation, l’échange validé de bout en bout est le suivant :
 \begin{itemize}[leftmargin=1.2cm]
@@ -113,18 +122,15 @@ Dans notre implémentation, l’échange validé de bout en bout est le suivant 
   \item il envoie \texttt{announce} et reçoit \texttt{ok} ;
   \item il envoie ensuite \texttt{look} pour rechercher un fichier ;
   \item il envoie \texttt{getfile} pour obtenir les peers sources ;
-  \item enfin, il peut initier un contact peer-to-peer de test.
+  \item enfin, il initie un échange Pair-Pair réel avec \texttt{interested} puis \texttt{getpieces}.
 \end{itemize}
 
 
-\vspace{0.5em}
-Ce flux est cohérent et respecte les principes de la connexion \textit{tracker-to-peer} : les commandes envoyées par Java sont correctement interprétées côté C, et les réponses du tracker sont exploitables côté Java.
-
-\subsection{Gestion des connexions multiples : \texttt{select()}}
+\subsection{Gestion des connexions multiples et framing : \texttt{select()}}
 
 Le serveur tracker utilise le mécanisme de multiplexage d'entrées/sorties \texttt{select()}
 pour gérer plusieurs peers connectés simultanément au sein d'un seul thread, conformément 
-aux recommandations du sujet.
+aux recommandations du sujet.\\
 
 À chaque itération de la boucle principale, le tracker reconstruit un ensemble de descripteurs (\texttt{fd\_set}) comprenant le socket serveur et tous les sockets clients actifs. \texttt{select()} bloque jusqu'à ce qu'une activité soit détectée sur l'un d'eux :
 
@@ -133,23 +139,20 @@ aux recommandations du sujet.
     connexion: \texttt{accept()} puis création du peer dans la table du tracker ;
 
     \item \textbf{Activité sur un socket client} $\rightarrow$ message entrant:
-    lecture, délégue le message vers le handler correspondant et envoie la réponse ;
+    accumulation dans un buffer par client, extraction des lignes terminées par \texttt{\textbackslash n}, délégation vers le handler correspondant puis envoi de la réponse ;
 
     \item \textbf{\texttt{recv()} retourne 0 ou $-1$} $\rightarrow$
     déconnexion : libération du slot et suppression du peer.
 \end{itemize}
 
-Ce choix évite la création d'un thread par client c qui nous évitera des problèmes de 
-synchronisation et de concurrence.
+Ce choix évite la création d'un thread par client et limite les problèmes de concurrence, tout en respectant les contraintes de \textit{message framing} sur TCP.
 
 \section{Prochaines étapes}
 
-Pour satisfaire pleinement le sujet, les développements prioritaires restants sont :
+Pour satisfaire les objectifs du projet, les développements prioritaires restants sont :
 
 \begin{itemize}[leftmargin=1.2cm]
-  \item finaliser le protocole Pair--Tracker, notamment \texttt{update} périodique et connexions TCP persistantes ;
-  \item implémenter le protocole Pair--Pair complet : \texttt{interested}/\texttt{have}, \texttt{getpieces}/\texttt{data} et buffermap Base64 ;
-  \item appliquer rigoureusement le \textit{message framing} (header texte + payload binaire) avec pièces de 1024 octets ;
+  \item finaliser le protocole Pair-Tracker, notamment la commande \texttt{update} périodique et la gestion complète du cycle de vie des connexions ;
   \item renforcer la robustesse d’exécution : gestion des erreurs de format, déconnexions voisines et configuration via \texttt{config.ini} ;
   \item compléter l’observabilité et la validation : logs, indicateurs de progression/débit et tests d’intégration multi-peers.
 \end{itemize}
