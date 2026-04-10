@@ -1,6 +1,6 @@
 CFLAGS = -Wall -Wextra -g -Iinclude
 
-.PHONY: c java run-c run-java clean rapport
+.PHONY: c java test-java run-c run-java clean rapport
 
 c: src/*.c
 	gcc $(CFLAGS) -o tracker src/*.c
@@ -12,8 +12,11 @@ java:
 	mkdir -p java/bin
 	javac -d java/bin java/*.java
 
+test-java: java
+	cd java && java -cp bin PeerProtocolTest
+
 run-java: java
-	cd java && java -cp bin Main
+	cd java && java -cp bin Main $(ARGS)
 
 rapport:
 	pdflatex rapport/rapport_projet.tex
