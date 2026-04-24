@@ -15,6 +15,9 @@ public class Peer {
     private Socket trackerSocket;
     private PrintWriter trackerOut;
     private BufferedReader trackerIn;
+    private final Object trackerIoLock = new Object();
+    private Thread periodicUpdateThread;
+    private volatile boolean periodicUpdateRunning;
     
     // Clé = Hash MD5 du fichier, Valeur = Détails (chemin, taille, pièces...)
     private Map<String, FileMetadata> managedFiles;
@@ -287,11 +290,27 @@ public class Peer {
         return sb.toString().trim() + "]";
     }
 
+    private String getSeedKeyList() {
+        StringBuilder sb = new StringBuilder("[");
+        for (FileMetadata fm : managedFiles.values()) {
+            if (fm.getState() == FileState.SEED) {
+                sb.append(fm.getHash()).append(" ");
+            }
+        }
+        return sb.toString().trim() + "]";
+    }
+
     public String buildAnnounceRequest() {
         String seeds = getSeedList();
         String leeches = getLeechList();
         return String.format("announce listen %d seed %s leech %s\n", 
                              this.port, seeds, leeches);
+    }
+
+    public String buildUpdateRequest() {
+        String seeds = getSeedKeyList();
+        String leeches = getLeechList();
+        return String.format("update seed %s leech %s\n", seeds, leeches);
     }
 
     public String buildLookRequest(List<String> criteria) {
@@ -342,10 +361,103 @@ public class Peer {
             }
 
             int payloadSize = extractTotalPayloadSize(header);
-            return readExactBytes(in, payloadSize);
+            byte[] payload = readExactBytes(in, payloadSize);
+            if (payload != null) {
+                recordReceivedPieces(key, indexes, payload);
+            }
+            return payload;
         } catch (IOException e) {
             System.err.println("Error requesting pieces from localhost:" + targetPort + " - " + e.getMessage());
             return null;
+        }
+    }
+
+    private void recordReceivedPieces(String key, List<Integer> indexes, byte[] payload) {
+        if (key == null || indexes == null || payload == null || indexes.isEmpty()) {
+            return;
+        }
+
+        FileMetadata fm = managedFiles.get(key);
+        if (fm == null) {
+            long estimatedSize = (long) (maxIndex(indexes) + 1) * 1024L;
+            fm = new FileMetadata(key, "/tmp/" + key + ".part", estimatedSize, FileState.LEECH);
+            managedFiles.put(key, fm);
+        } else {
+            fm.setState(FileState.LEECH);
+        }
+
+        updateBufferMapFromIndexes(fm, indexes);
+        savePayloadPieces(fm, indexes, payload);
+    }
+
+    private int maxIndex(List<Integer> indexes) {
+        int max = 0;
+        for (int index : indexes) {
+            if (index > max) {
+                max = index;
+            }
+        }
+        return max;
+    }
+
+    private void updateBufferMapFromIndexes(FileMetadata fm, List<Integer> indexes) {
+        int highestIndex = maxIndex(indexes);
+        int pieceCount = Math.max(1, highestIndex + 1);
+        byte[] bits = new byte[(pieceCount + 7) / 8];
+
+        String currentBufferMap = fm.getBufferMap();
+        if (currentBufferMap != null && !currentBufferMap.isEmpty()) {
+            try {
+                byte[] existingBits = Base64.getDecoder().decode(currentBufferMap);
+                System.arraycopy(existingBits, 0, bits, 0, Math.min(existingBits.length, bits.length));
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+
+        for (int index : indexes) {
+            int byteIndex = index / 8;
+            int bitIndex = 7 - (index % 8);
+            if (byteIndex < bits.length) {
+                bits[byteIndex] |= (byte) (1 << bitIndex);
+            }
+        }
+
+        fm.setBufferMap(Base64.getEncoder().encodeToString(bits));
+    }
+
+    private void savePayloadPieces(FileMetadata fm, List<Integer> indexes, byte[] payload) {
+        File targetFile = fm.getlocalPath();
+        if (targetFile == null) {
+            targetFile = new File("/tmp/" + fm.getHash() + ".part");
+            fm.setlocalPath(targetFile);
+        }
+
+        File parent = targetFile.getParentFile();
+        if (parent != null && !parent.exists()) {
+            parent.mkdirs();
+        }
+
+        int pieceSize = 1024;
+        try (RandomAccessFile raf = new RandomAccessFile(targetFile, "rw")) {
+            int offset = 0;
+            for (int index : indexes) {
+                if (offset + pieceSize > payload.length) {
+                    break;
+                }
+
+                raf.seek((long) index * pieceSize);
+                raf.write(payload, offset, pieceSize);
+                offset += pieceSize;
+            }
+
+            long newSize = Math.max(fm.getSize(), (long) (maxIndex(indexes) + 1) * pieceSize);
+            fm.setPath(targetFile.getAbsolutePath());
+            fm.setState(FileState.LEECH);
+            if (newSize > fm.getSize()) {
+                // keep the existing reported size in the metadata contract, the file path carries the saved pieces
+            }
+        } catch (IOException e) {
+            System.err.println("Error saving received pieces for " + fm.getHash() + ": " + e.getMessage());
         }
     }
 
@@ -370,20 +482,86 @@ public class Peer {
             return;
         }
 
-        String announce = buildAnnounceRequest();
-        trackerOut.print(announce);
-        trackerOut.flush();
-        System.out.println("Sent to tracker: " + announce);
-
         try {
-            String response = trackerIn.readLine();
-            if ("ok".equals(response.trim())) {
+            String announce = buildAnnounceRequest();
+            String response = sendTrackerRequest(announce);
+            if (response != null && "ok".equals(response.trim())) {
+                System.out.println("Sent to tracker: " + announce.trim());
                 System.out.println("Tracker acknowledged announce!");
+                startPeriodicUpdate(10000L);
             } else {
                 System.err.println("Unexpected tracker response: " + response);
             }
         } catch (IOException e) {
             System.err.println("Error reading tracker response: " + e.getMessage());
+        }
+    }
+
+    private String sendTrackerRequest(String request) throws IOException {
+        synchronized (trackerIoLock) {
+            if (trackerOut == null || trackerIn == null) {
+                throw new IOException("tracker connection is not available");
+            }
+            trackerOut.print(request);
+            trackerOut.flush();
+            String response = trackerIn.readLine();
+            if (response == null) {
+                closeTrackerConnectionLocked();
+                throw new IOException("tracker disconnected");
+            }
+            return response;
+        }
+    }
+
+    private void closeTrackerConnectionLocked() {
+        try {
+            if (trackerIn != null) trackerIn.close();
+        } catch (IOException ignored) {
+        }
+        if (trackerOut != null) {
+            trackerOut.close();
+        }
+        try {
+            if (trackerSocket != null && !trackerSocket.isClosed()) {
+                trackerSocket.close();
+            }
+        } catch (IOException ignored) {
+        }
+        trackerIn = null;
+        trackerOut = null;
+        trackerSocket = null;
+    }
+
+    private void startPeriodicUpdate(long periodMs) {
+        synchronized (trackerIoLock) {
+            if (periodicUpdateThread != null && periodicUpdateThread.isAlive()) {
+                return;
+            }
+            periodicUpdateRunning = true;
+            periodicUpdateThread = new Thread(() -> {
+                while (periodicUpdateRunning) {
+                    try {
+                        Thread.sleep(periodMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+
+                    try {
+                        String response = sendTrackerRequest(buildUpdateRequest());
+                        if (response == null || !"ok".equals(response.trim())) {
+                            System.err.println("[UPDATE] Unexpected tracker response: " + response);
+                        }
+                    } catch (IOException e) {
+                        System.err.println("[UPDATE] Stopped periodic update: " + e.getMessage());
+                        break;
+                    }
+                }
+                periodicUpdateRunning = false;
+            });
+            periodicUpdateThread.setName("tracker-periodic-update-" + this.port);
+            periodicUpdateThread.setDaemon(true);
+            periodicUpdateThread.start();
         }
     }
 
@@ -393,13 +571,7 @@ public class Peer {
                 System.err.println("Tracker connection is not available. Start the tracker before using look.");
                 return;
             }
-            trackerOut.print(buildLookByNameRequest(filename));
-            trackerOut.flush();
-            String response = trackerIn.readLine();
-            if (response == null) {
-                System.err.println("[WARNING] Tracker disconnected.");
-                return;
-            }
+            String response = sendTrackerRequest(buildLookByNameRequest(filename));
             System.out.println("Tracker response: " + response);
         } catch (IOException e) {
             System.err.println("Error during look: " + e.getMessage());
@@ -412,13 +584,7 @@ public class Peer {
                 System.err.println("Tracker connection is not available. Start the tracker before using getfile.");
                 return;
             }
-            trackerOut.print(buildGetFileRequest(key));
-            trackerOut.flush();
-            String response = trackerIn.readLine();
-            if (response == null) {
-                System.err.println("[WARNING] Tracker disconnected.");
-                return;
-            }
+            String response = sendTrackerRequest(buildGetFileRequest(key));
             System.out.println("Tracker response: " + response);
         } catch (IOException e) {
             System.err.println("Error during getfile: " + e.getMessage());

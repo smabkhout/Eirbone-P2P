@@ -69,6 +69,79 @@ static file_t* findFileByKey(tracker_t* tracker, MD5 key) {
     return NULL; 
 }
 
+static void clearPeerFileLists(peer_t* peer) {
+    if (peer == NULL) return;
+
+    file_t* unique_files[MAX_FILES * 2];
+    int unique_count = 0;
+
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (peer->seededFiles[i] != NULL) {
+            int seen = 0;
+            for (int j = 0; j < unique_count; j++) {
+                if (unique_files[j] == peer->seededFiles[i]) {
+                    seen = 1;
+                    break;
+                }
+            }
+            if (!seen) unique_files[unique_count++] = peer->seededFiles[i];
+            peer->seededFiles[i] = NULL;
+        }
+
+        if (peer->leechedFiles[i] != NULL) {
+            int seen = 0;
+            for (int j = 0; j < unique_count; j++) {
+                if (unique_files[j] == peer->leechedFiles[i]) {
+                    seen = 1;
+                    break;
+                }
+            }
+            if (!seen) unique_files[unique_count++] = peer->leechedFiles[i];
+            peer->leechedFiles[i] = NULL;
+        }
+    }
+
+    for (int i = 0; i < unique_count; i++) {
+        fileRelease(unique_files[i]);
+    }
+}
+
+static int collectPeerKnownFiles(peer_t* peer, file_t** out_files, int max_out) {
+    if (peer == NULL || out_files == NULL || max_out <= 0) return 0;
+
+    int count = 0;
+    for (int i = 0; i < MAX_FILES; i++) {
+        file_t* candidates[2] = { peer->seededFiles[i], peer->leechedFiles[i] };
+        for (int c = 0; c < 2; c++) {
+            file_t* f = candidates[c];
+            if (f == NULL) continue;
+
+            int seen = 0;
+            for (int j = 0; j < count; j++) {
+                if (out_files[j] == f) {
+                    seen = 1;
+                    break;
+                }
+            }
+            if (!seen && count < max_out) {
+                out_files[count++] = f;
+                fileRetain(f);
+            }
+        }
+    }
+    return count;
+}
+
+static file_t* findFileInArrayByKey(file_t** files, int file_count, const char* key) {
+    if (files == NULL || key == NULL) return NULL;
+    for (int i = 0; i < file_count; i++) {
+        if (files[i] != NULL && strcmp(files[i]->key, key) == 0) {
+            return files[i];
+        }
+    }
+    return NULL;
+}
+
 static int parseSeedList(tracker_t* tracker, peer_t* peer, char **filename, char **saveptr, char* response_buffer){
 
     char *tmp_filename;
@@ -113,14 +186,22 @@ static int parseLeechList(tracker_t* tracker, peer_t* peer, char **saveptr){
 }
 
 int handleAnnounce(tracker_t* tracker, peer_t* current_peer, char** saveptr, char* response_buffer) {
-    char* listen_kw = strtok_r(NULL, " ", saveptr);
-    char* port_str = strtok_r(NULL, " ", saveptr);
-    
-    if (!listen_kw || !port_str || strcmp(listen_kw, "listen") != 0) return -1;
+    char* first_kw = strtok_r(NULL, " ", saveptr);
+    char* next_kw = first_kw;
 
-    current_peer->listeningPort = atoi(port_str);
+    if (first_kw == NULL) return -1;
+
+    if (strcmp(first_kw, "listen") == 0) {
+        char* port_str = strtok_r(NULL, " ", saveptr);
+        if (port_str == NULL) return -1;
+        current_peer->listeningPort = atoi(port_str);
+        next_kw = strtok_r(NULL, " ", saveptr);
+    }
+
+    clearPeerFileLists(current_peer);
+
     char* file_name = NULL;
-    char* seed_kw = strtok_r(NULL, " ", saveptr);
+    char* seed_kw = next_kw;
     if (seed_kw && strcmp(seed_kw, "seed") == 0) {
         if (parseSeedList(tracker, current_peer, &file_name, saveptr, response_buffer) != 0) {
             return -1; 
@@ -140,6 +221,64 @@ int handleAnnounce(tracker_t* tracker, peer_t* current_peer, char** saveptr, cha
     }
     sprintf(response_buffer, "ok\n");
     printf("[ANNOUNCE] Peer %s:%d announced\n", current_peer->ipAddr, current_peer->listeningPort);
+    return 0;
+}
+
+int handleUpdate(tracker_t* tracker, peer_t* current_peer, char** saveptr, char* response_buffer) {
+    if (tracker == NULL || current_peer == NULL || saveptr == NULL || response_buffer == NULL) {
+        return -1;
+    }
+
+    char* seed_kw = strtok_r(NULL, " \r\n", saveptr);
+    if (seed_kw == NULL || strcmp(seed_kw, "seed") != 0) {
+        sprintf(response_buffer, "KO: missing seed section\n");
+        return -1;
+    }
+
+    file_t* known_files[MAX_FILES * 2];
+    int known_count = collectPeerKnownFiles(current_peer, known_files, MAX_FILES * 2);
+
+    clearPeerFileLists(current_peer);
+
+    char* tok = NULL;
+    while ((tok = strtok_r(NULL, " []\r\n", saveptr)) != NULL) {
+        if (strcmp(tok, "leech") == 0) {
+            break;
+        }
+
+        file_t* f = findFileInArrayByKey(known_files, known_count, tok);
+        if (f == NULL) {
+            f = findFileByKey(tracker, tok);
+        }
+        if (f != NULL) {
+            peerAddSeed(current_peer, f);
+        } else {
+            printf("[UPDATE] Unknown seed key ignored: %s\n", tok);
+        }
+    }
+
+    if (tok == NULL || strcmp(tok, "leech") != 0) {
+        for (int i = 0; i < known_count; i++) fileRelease(known_files[i]);
+        sprintf(response_buffer, "KO: missing leech section\n");
+        return -1;
+    }
+
+    while ((tok = strtok_r(NULL, " []\r\n", saveptr)) != NULL) {
+        file_t* f = findFileInArrayByKey(known_files, known_count, tok);
+        if (f == NULL) {
+            f = findFileByKey(tracker, tok);
+        }
+        if (f != NULL) {
+            peerAddLeech(current_peer, f);
+        } else {
+            printf("[UPDATE] Unknown leech key ignored: %s\n", tok);
+        }
+    }
+
+    for (int i = 0; i < known_count; i++) fileRelease(known_files[i]);
+
+    sprintf(response_buffer, "ok\n");
+    printf("[UPDATE] Peer %s:%d updated state\n", current_peer->ipAddr, current_peer->listeningPort);
     return 0;
 }
 

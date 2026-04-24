@@ -5,6 +5,7 @@ import java.util.List;
 import java.io.File;
 import java.io.FileInputStream;
 import java.security.MessageDigest;
+import java.util.Base64;
 
 public class Main {
     private static String md5Hex(File file) throws Exception {
@@ -105,7 +106,12 @@ public class Main {
                     int targetPort = Integer.parseInt(parts[1]);
                     String key = parts[2];
                     String response = peer.requestInterested(targetPort, key);
-                    System.out.println(response == null ? "No response" : response);
+                    if (response == null) {
+                        System.out.println("No response");
+                    } else {
+                        System.out.println(response);
+                        System.out.println("(pieces disponibles: " + decodeBuffermapToIndexes(response) + ")");
+                    }
                 } else if ("getpieces".equalsIgnoreCase(cmd)) {
                     if (parts.length < 4) {
                         System.out.println("Usage: getpieces <port> <key> <idx...>");
@@ -140,6 +146,43 @@ public class Main {
 
         } catch (Exception e) {
             System.err.println("Error initializing Peer application: " + e.getMessage());
+        }
+    }
+
+    private static String decodeBuffermapToIndexes(String response) {
+        String[] tokens = response.trim().split("\\s+", 3);
+        if (tokens.length < 3 || !"have".equals(tokens[0])) {
+            return "[]";
+        }
+
+        try {
+            byte[] buffermap = Base64.getDecoder().decode(tokens[2]);
+            List<Integer> indexes = new ArrayList<>();
+
+            for (int byteIndex = 0; byteIndex < buffermap.length; byteIndex++) {
+                for (int bit = 0; bit < 8; bit++) {
+                    int mask = 1 << (7 - bit);
+                    if ((buffermap[byteIndex] & mask) != 0) {
+                        indexes.add(byteIndex * 8 + bit);
+                    }
+                }
+            }
+
+            if (indexes.isEmpty()) {
+                return "[]";
+            }
+
+            StringBuilder sb = new StringBuilder("[");
+            for (int i = 0; i < indexes.size(); i++) {
+                if (i > 0) {
+                    sb.append(" ");
+                }
+                sb.append(indexes.get(i));
+            }
+            sb.append("]");
+            return sb.toString();
+        } catch (IllegalArgumentException e) {
+            return "invalid buffermap";
         }
     }
 }

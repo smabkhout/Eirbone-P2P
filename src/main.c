@@ -172,8 +172,8 @@ int main(int argc, char *argv[]){
                     handleLook(tracker, &saveptr, answer);
                 else if (strcmp(cmd, "getfile")  == 0)
                     handleGetfile(tracker, &saveptr, answer);
-                // else if (strcmp(cmd, "update")   == 0)
-                //     handleUpdate(tracker, tracker->peers[i], &saveptr, answer);
+                else if (strcmp(cmd, "update")   == 0)
+                    handleUpdate(tracker, tracker->peers[i], &saveptr, answer);
                 else {
                     sprintf(answer, "error unknown command\n");
                     if (tracker->peers[i] != NULL) {

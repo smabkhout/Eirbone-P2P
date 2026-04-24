@@ -100,7 +100,40 @@ void test_handleGetfile() {
     
     handleGetfile(my_tracker, &saveptr, response);
     assert(strstr(response, "192.168.1.50") == NULL); //peer doesn't have that key
-    printf("PASSEF\n");
+    printf("PASSED\n");
+
+    freeTracker(my_tracker);
+    printf("\n");
+}
+
+void test_handleUpdate() {
+    printf("TEST handleUpdate\n");
+
+    tracker_t* my_tracker = initTracker();
+    peer_t* my_peer = addPeer(my_tracker, "192.168.1.70", 3333);
+    peer_t* other_peer = addPeer(my_tracker, "192.168.1.80", 4444);
+    char response[512];
+
+    char announce_raw[] = "announce listen 3333 seed [file_a.dat 2048 1024 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa] leech []";
+    char* saveptr;
+    char* first_word = strtok_r(announce_raw, " \r\n", &saveptr);
+    assert(first_word && strcmp(first_word, "announce") == 0);
+    assert(handleAnnounce(my_tracker, my_peer, &saveptr, response) == 0);
+
+    file_t* file_b = initFile("file_b.dat", 4096, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", 1024);
+    assert(peerAddSeed(other_peer, file_b) == 0);
+
+    assert(peerRequestFile(my_peer, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == SEEDER);
+    assert(peerRequestFile(my_peer, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") == NONE);
+
+    char update_raw[] = "update seed [bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb] leech []";
+    first_word = strtok_r(update_raw, " \r\n", &saveptr);
+    assert(first_word && strcmp(first_word, "update") == 0);
+    assert(handleUpdate(my_tracker, my_peer, &saveptr, response) == 0);
+
+    assert(peerRequestFile(my_peer, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == NONE);
+    assert(peerRequestFile(my_peer, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb") == SEEDER);
+    printf("PASSED\n");
 
     freeTracker(my_tracker);
     printf("\n");
@@ -112,6 +145,7 @@ int main() {
     test_handleAnnounce();
     test_handleLook();    
     test_handleGetfile();
+    test_handleUpdate();
     
     printf("OK\n");
     return 0;

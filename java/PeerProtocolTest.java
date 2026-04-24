@@ -10,6 +10,7 @@ public class PeerProtocolTest {
 
         testInterestedHaveBetweenTwoPeers();
         testGetPiecesDataBetweenTwoPeers();
+        testReceivedPiecesAreRecordedAndAdvertised();
 
         System.out.println("\nOK");
     }
@@ -28,7 +29,7 @@ public class PeerProtocolTest {
 
         serverPeer.registerFile(key, tempFile.getAbsolutePath(), tempFile.length(), FileState.SEED);
         serverPeer.startListening();
-        Thread.sleep(200);
+        clientPeer.startListening();
 
         String response = clientPeer.requestInterested(serverPort, key);
         assertTrue(response != null, "No HAVE response received");
@@ -72,6 +73,38 @@ public class PeerProtocolTest {
             byte expected = (byte) (i % 256);
             assertTrue(payload[i] == expected, "Unexpected payload byte at index " + i);
         }
+
+        tempFile.delete();
+        System.out.println("PASSED");
+    }
+
+    private static void testReceivedPiecesAreRecordedAndAdvertised() throws Exception {
+        System.out.println("TEST received pieces are recorded");
+
+        int serverPort = getFreePort();
+        int clientPort = getFreePort();
+
+        Peer serverPeer = new Peer(serverPort);
+        Peer clientPeer = new Peer(clientPort);
+
+        File tempFile = createTempFileWithPattern(2048);
+        String key = "8905e92afeb80fc7722ec89eb0bf0966";
+
+        serverPeer.registerFile(key, tempFile.getAbsolutePath(), tempFile.length(), FileState.SEED);
+        serverPeer.startListening();
+        Thread.sleep(200);
+
+        byte[] payload = clientPeer.requestPieces(serverPort, key, Arrays.asList(0));
+        assertTrue(payload != null, "No payload received");
+
+        FileMetadata fm = clientPeer.getManagedFiles().get(key);
+        assertTrue(fm != null, "Received pieces were not recorded locally");
+        assertTrue(fm.getState() == FileState.LEECH, "Expected leech state after receiving pieces");
+        assertTrue(fm.getBufferMap() != null && !fm.getBufferMap().isEmpty(), "Expected a non-empty buffermap after recording pieces");
+        assertTrue(fm.getlocalPath() != null && fm.getlocalPath().exists(), "Expected received pieces to be written to disk");
+
+        String update = clientPeer.buildUpdateRequest();
+        assertTrue(update.contains("leech [" + key + "]") || update.contains("leech [" + key + " "), "Update request should advertise the received key: " + update);
 
         tempFile.delete();
         System.out.println("PASSED");
