@@ -2,7 +2,10 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.net.ServerSocket;
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
+import java.util.Scanner;
 
 public class Main {
   private static String md5Hex(File file) throws Exception {
