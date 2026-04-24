@@ -114,7 +114,7 @@ Un test Java dédié (\texttt{PeerProtocolTest}) valide aussi les échanges \tex
 
 \section{Connexion entre la partie C et la partie Java}
 
-La connexion entre C et Java (flux Pair--Tracker) est réalisée via une socket TCP, avec un protocole texte simple : une commande par ligne et une réponse normalisée. Les échanges Pair--Pair conservent le même principe pour le header, puis ajoutent une payload binaire pour \texttt{data}.\\
+La connexion entre C et Java est réalisée via une socket TCP, avec un protocole texte simple : une commande par ligne et une réponse normalisée.\\
 
 Dans notre implémentation, l’échange validé de bout en bout est le suivant :
 \begin{itemize}[leftmargin=1.2cm]
@@ -152,7 +152,7 @@ Ce choix évite la création d'un thread par client et limite les problèmes de 
 Pour satisfaire les objectifs du projet, les développements prioritaires restants sont :
 
 \begin{itemize}[leftmargin=1.2cm]
-  \item finaliser le protocole Pair-Tracker, notamment la commande \texttt{update} périodique et la gestion complète du cycle de vie des connexions ;
+  \item finaliser le protocole Pair-Tracker, notamment \texttt{update} périodique et connexions TCP persistantes ;
   \item renforcer la robustesse d’exécution : gestion des erreurs de format, déconnexions voisines et configuration via \texttt{config.ini} ;
   \item compléter l’observabilité et la validation : logs, indicateurs de progression/débit et tests d’intégration multi-peers.
 \end{itemize}
