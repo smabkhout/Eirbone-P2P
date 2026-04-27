@@ -4,7 +4,7 @@ enum FileState { SEED, LEECH, NONE }
 
 public class FileMetadata {
   private final String MD5hash;
-  private final long size;
+  private long size;
   private File localPath;
   private String bufferMap;
   private FileState state;
@@ -24,6 +24,7 @@ public class FileMetadata {
   public String getFileName() { return localPath.getName(); }
   public String getHash() { return MD5hash; }
   public long getSize() { return size; }
+  public void setSize(long size) { this.size = size; }
   public File getlocalPath() { return localPath; }
   public void setlocalPath(File file) { this.localPath = file; }
   public void setPath(String newPath) { this.localPath = new File(newPath); }

@@ -59,6 +59,15 @@ public class Main {
       peer.connectToTracker(
           "127.0.0.1", 12345); // we should use the tracker's ip (from args)
 
+      try {
+        PeerDashboard dashboard = new PeerDashboard(peer);
+        int dashPort = dashboard.start();
+        System.out.println("Peer dashboard: http://localhost:" + dashPort);
+        new ProcessBuilder("xdg-open", "http://localhost:" + dashPort).start();
+      } catch (Exception e) {
+        System.err.println("[WARN] Could not start peer dashboard: " + e.getMessage());
+      }
+
       System.out.println("\nPeer initialized successfully!");
       System.out.println("IP: " + peer.getIpAddress());
       System.out.println("Assigned Random Port: " + peer.getPort());

@@ -490,11 +490,11 @@ public class Peer {
                 offset += pieceSize;
             }
 
-            long newSize = Math.max(fm.getSize(), (long) (maxIndex(indexes) + 1) * pieceSize);
+            long newSize = (long) (maxIndex(indexes) + 1) * pieceSize;
             fm.setPath(targetFile.getAbsolutePath());
             fm.setState(FileState.LEECH);
             if (newSize > fm.getSize()) {
-                // keep the existing reported size in the metadata contract, the file path carries the saved pieces
+                fm.setSize(newSize);
             }
         } catch (IOException e) {
             System.err.println("Error saving received pieces for " + fm.getHash() + ": " + e.getMessage());

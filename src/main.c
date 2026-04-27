@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "tracker.h"
+#include "http.h"
 
 #define BUFFER_SIZE 512
 #define CLIENT_INBUF_SIZE 4096
@@ -62,7 +63,29 @@ int main(int argc, char *argv[]) {
   if (listen(server_fd, 5) < 0)
     error("ERROR on listen");
 
+  /* HTTP dashboard on portno+1 */
+  int http_fd;
+  int http_port = portno + 1;
+  if ((http_fd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    error("ERROR opening HTTP socket");
+  struct sockaddr_in http_addr;
+  memset(&http_addr, 0, sizeof(http_addr));
+  http_addr.sin_family = AF_INET;
+  http_addr.sin_addr.s_addr = INADDR_ANY;
+  http_addr.sin_port = htons(http_port);
+  int http_opt = 1;
+  if (setsockopt(http_fd, SOL_SOCKET, SO_REUSEADDR, &http_opt, sizeof(http_opt)) < 0)
+    error("ERROR on http setsockopt");
+  if (bind(http_fd, (struct sockaddr *)&http_addr, sizeof(http_addr)) < 0)
+    error("ERROR on http binding");
+  if (listen(http_fd, 5) < 0)
+    error("ERROR on http listen");
+
   printf("Tracker is listening on port %d...\n", portno);
+  printf("Dashboard:  http://localhost:%d\n", http_port);
+  char open_cmd[128];
+  snprintf(open_cmd, sizeof(open_cmd), "xdg-open 'http://localhost:%d' &", http_port);
+  system(open_cmd);
 
   char buffer[BUFFER_SIZE];
   char answer[BUFFER_SIZE];
@@ -74,7 +97,9 @@ int main(int argc, char *argv[]) {
     // at each iteration
     FD_ZERO(&read_fds);
     FD_SET(server_fd, &read_fds);
+    FD_SET(http_fd, &read_fds);
     max_fd = server_fd;
+    if (http_fd > max_fd) max_fd = http_fd;
 
     for (int i = 0; i < MAX_PEERS; i++) {
       if (client_fds[i] != -1) {
@@ -87,6 +112,16 @@ int main(int argc, char *argv[]) {
     if (select(max_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
       perror("select");
       break;
+    }
+
+    if (FD_ISSET(http_fd, &read_fds)) {
+      struct sockaddr_in cl_addr;
+      socklen_t cl_len = sizeof(cl_addr);
+      int hclient = accept(http_fd, (struct sockaddr *)&cl_addr, &cl_len);
+      if (hclient >= 0) {
+        serveHttpRequest(tracker, hclient);
+        close(hclient);
+      }
     }
 
     if (FD_ISSET(server_fd, &read_fds)) {
@@ -107,14 +142,14 @@ int main(int argc, char *argv[]) {
       }
 
       if (slot == -1) {
-        printf("[TRACKER] Max peers reached, rejecting %s\n", ip);
+        tracker_log("[TRACKER] Max peers reached, rejecting %s\n", ip);
         close(client_fd);
       } else {
         client_fds[slot] = client_fd;
         tracker->peers[slot] = initPeer(ip, 0);
         client_inbuf[slot][0] = '\0';
         client_inbuf_len[slot] = 0;
-        printf("[CONNECT] %s assigned to slot %d\n", ip, slot);
+        tracker_log("[CONNECT] %s assigned to slot %d\n", ip, slot);
       }
     }
 
@@ -128,10 +163,10 @@ int main(int argc, char *argv[]) {
       int b = recv(client_fds[i], buffer, sizeof(buffer) - 1, 0);
       if (b <= 0) {
         if (tracker->peers[i] != NULL) {
-          printf("[DISCONNECT] slot %d (%s)\n", i, tracker->peers[i]->ipAddr);
+          tracker_log("[DISCONNECT] slot %d (%s)\n", i, tracker->peers[i]->ipAddr);
           removePeer(tracker, tracker->peers[i]);
         } else {
-          printf("[DISCONNECT] slot %d (unknown)\n", i);
+          tracker_log("[DISCONNECT] slot %d (unknown)\n", i);
         }
         close(client_fds[i]);
         client_fds[i] = -1;
@@ -141,8 +176,7 @@ int main(int argc, char *argv[]) {
       }
 
       if (client_inbuf_len[i] + (size_t)b >= CLIENT_INBUF_SIZE) {
-        printf("[ERROR] Input buffer overflow for slot %d, resetting buffer\n",
-               i);
+        tracker_log("[ERROR] Input buffer overflow for slot %d, resetting buffer\n", i);
         client_inbuf_len[i] = 0;
         client_inbuf[i][0] = '\0';
       }
@@ -182,7 +216,7 @@ int main(int argc, char *argv[]) {
                 else {
                     sprintf(answer, "error unknown command\n");
                     if (tracker->peers[i] != NULL) {
-                        printf("[ERROR] Unknown command from %s: %s\n", tracker->peers[i]->ipAddr, cmd);
+                        tracker_log("[ERROR] Unknown command from %s: %s\n", tracker->peers[i]->ipAddr, cmd);
                     }
                 }
 
@@ -202,5 +236,6 @@ int main(int argc, char *argv[]) {
   }
   freeTracker(tracker);
   close(server_fd);
+  close(http_fd);
   return 0;
 }

@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eirbone — Tracker</title>
+  <link rel="stylesheet" href="/tracker.css">
+</head>
+<body>
+  <header>
+    <span class="brand">Eirbone</span>
+    <span class="role">Tracker</span>
+    <span class="live"><span class="dot"></span><span id="ts">connecting…</span></span>
+  </header>
+  <main>
+    <div class="stats">
+      <div class="stat-box">
+        <span class="stat-val" id="peer-count">—</span>
+        <span class="stat-lbl">peers connected</span>
+      </div>
+    </div>
+    <table id="peer-table" hidden>
+      <thead>
+        <tr>
+          <th>Address</th>
+          <th>Status</th>
+          <th>Seeding</th>
+          <th>Leeching</th>
+        </tr>
+      </thead>
+      <tbody id="peer-rows"></tbody>
+    </table>
+    <p class="empty" id="empty-msg">No peers connected yet.</p>
+    <section class="log-section">
+      <h2 class="log-title">Log</h2>
+      <div id="log-box"><p class="empty">No events yet.</p></div>
+    </section>
+  </main>
+  <script src="/tracker.js"></script>
+</body>
+</html>

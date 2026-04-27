@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Eirbone — My Files</title>
+  <link rel="stylesheet" href="/peer.css">
+</head>
+<body>
+  <header>
+    <span class="brand">Eirbone</span>
+    <span class="role">Peer</span>
+    <span class="self-addr" id="self-addr"></span>
+    <span class="live"><span class="dot"></span><span id="ts">connecting…</span></span>
+  </header>
+  <main>
+    <section class="section">
+      <h2>Seeding <span class="count" id="seed-count">0</span></h2>
+      <div id="seeding"><p class="empty">No files being seeded.</p></div>
+    </section>
+    <section class="section">
+      <h2>Leeching <span class="count" id="leech-count">0</span></h2>
+      <div id="leeching"><p class="empty">No files being downloaded.</p></div>
+    </section>
+  </main>
+  <script src="/peer.js"></script>
+</body>
+</html>
