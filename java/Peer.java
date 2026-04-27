@@ -22,6 +22,10 @@ public class Peer {
     // Clé = Hash MD5 du fichier, Valeur = Détails (chemin, taille, pièces...)
     private Map<String, FileMetadata> managedFiles;
 
+    // populated by look/interested responses so leech downloads use the real name & size
+    private final Map<String, String> keyToFilename = new HashMap<>();
+    private final Map<String, Long>   keyToSize     = new HashMap<>();
+
   public Peer(int port) {
     try {
       this.ip = InetAddress.getLocalHost().getHostAddress();
@@ -375,12 +379,30 @@ public class Peer {
       out.write(("interested " + key + "\n").getBytes(StandardCharsets.UTF_8));
       out.flush();
 
-      return readAsciiLine(in);
+      String response = readAsciiLine(in);
+      // "have <key> <base64bitmap>" — the seeder has all bits set, so
+      // counting '1' bits gives the true total pieces for the file.
+      if (response != null && response.startsWith("have ")) {
+          String[] parts = response.split("\\s+", 3);
+          if (parts.length == 3) updateSizeFromSeedBitmap(key, parts[2]);
+      }
+      return response;
     } catch (IOException e) {
       System.err.println("Error requesting interested from localhost:" +
                          targetPort + " - " + e.getMessage());
       return null;
     }
+  }
+
+  // Counts set bits in the seeder's bitmap to derive totalPieces and the correct size.
+  private void updateSizeFromSeedBitmap(String key, String base64) {
+      if (keyToSize.containsKey(key)) return;
+      try {
+          byte[] bits = Base64.getDecoder().decode(base64);
+          int totalPieces = 0;
+          for (byte b : bits) totalPieces += Integer.bitCount(b & 0xFF);
+          if (totalPieces > 0) keyToSize.put(key, (long) totalPieces * 1024);
+      } catch (IllegalArgumentException ignored) {}
   }
 
   public byte[] requestPieces(int targetPort, String key,
@@ -419,8 +441,9 @@ public class Peer {
 
         FileMetadata fm = managedFiles.get(key);
         if (fm == null) {
-            long estimatedSize = (long) (maxIndex(indexes) + 1) * 1024L;
-            fm = new FileMetadata(key, "/tmp/" + key + ".part", estimatedSize, FileState.LEECH);
+            String fname = keyToFilename.getOrDefault(key, key + ".part");
+            long   size  = keyToSize.getOrDefault(key, (long)(maxIndex(indexes) + 1) * 1024L);
+            fm = new FileMetadata(key, "/tmp/" + fname, size, FileState.LEECH);
             managedFiles.put(key, fm);
         } else {
             fm.setState(FileState.LEECH);
@@ -490,12 +513,13 @@ public class Peer {
                 offset += pieceSize;
             }
 
-            long newSize = (long) (maxIndex(indexes) + 1) * pieceSize;
+            Long knownSize = keyToSize.get(fm.getHash());
+            long newSize = knownSize != null
+                ? Math.max(fm.getSize(), knownSize)
+                : (long)(maxIndex(indexes) + 1) * pieceSize;
             fm.setPath(targetFile.getAbsolutePath());
             fm.setState(FileState.LEECH);
-            if (newSize > fm.getSize()) {
-                fm.setSize(newSize);
-            }
+            if (newSize > fm.getSize()) fm.setSize(newSize);
         } catch (IOException e) {
             System.err.println("Error saving received pieces for " + fm.getHash() + ": " + e.getMessage());
         }
@@ -615,8 +639,28 @@ public class Peer {
             }
             String response = sendTrackerRequest(buildLookByNameRequest(filename));
             System.out.println("Tracker response: " + response);
+            parseLookResponse(response);
         } catch (IOException e) {
             System.err.println("Error during look: " + e.getMessage());
+        }
+    }
+
+    // Parses "list [filename length piece_size key ...]" and stores key→filename/size.
+    private void parseLookResponse(String response) {
+        if (response == null || !response.startsWith("list [")) return;
+        int start = response.indexOf('[') + 1;
+        int end   = response.lastIndexOf(']');
+        if (end <= start) return;
+        String[] tok = response.substring(start, end).trim().split("\\s+");
+        for (int i = 0; i + 4 <= tok.length; i += 4) {
+            try {
+                String key  = tok[i + 3];
+                long   size = Long.parseLong(tok[i + 1]);
+                keyToFilename.putIfAbsent(key, tok[i]);
+                keyToSize.putIfAbsent(key, size);
+            } catch (NumberFormatException e) {
+                break;
+            }
         }
     }
 

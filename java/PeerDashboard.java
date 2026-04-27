@@ -90,11 +90,12 @@ public class PeerDashboard {
                 if (got == 0) continue;
                 if (!first) sb.append(",");
                 first = false;
+                boolean partial = got < totalPieces;
                 sb.append("{\"filename\":\"").append(escJson(fm.getFileName())).append("\"");
                 sb.append(",\"size\":").append(fm.getSize());
                 sb.append(",\"md5\":\"").append(fm.getHash()).append("\"");
-                sb.append(",\"pieces\":").append(got);
-                sb.append(",\"partial\":true}");
+                sb.append(",\"pieces\":").append(partial ? got : totalPieces);
+                sb.append(",\"partial\":").append(partial).append("}");
             }
         }
 
