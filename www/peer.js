@@ -69,3 +69,188 @@ function render(d) {
 
 poll();
 setInterval(poll, 2000);
+
+/* ── file search ─────────────────────────────────────────────────────────── */
+
+const selectedPieces = {};
+
+async function searchFiles() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+  const btn = document.getElementById('search-btn');
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const r = await fetch('/api/look?q=' + encodeURIComponent(q));
+    const d = await r.json();
+    renderSearchResults(d.files || []);
+  } catch (e) {
+    document.getElementById('search-results').innerHTML =
+      '<p class="empty">Search failed.</p>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Search';
+  }
+}
+
+function renderSearchResults(files) {
+  const el = document.getElementById('search-results');
+  if (!files.length) {
+    el.innerHTML = '<p class="empty">No files found.</p>';
+    return;
+  }
+  el.innerHTML = files.map(f => `
+    <div class="result-card">
+      <div class="result-top">
+        <span class="result-name">${f.filename}</span>
+        <span class="result-meta">${fmt(f.size)} &bull; ${f.pieces} pieces &bull; <code>${f.md5.slice(0,8)}&hellip;</code></span>
+        <button class="btn" onclick="getPeers('${f.md5}', this)">Get Peers</button>
+      </div>
+      <div class="peer-list" id="peers-${f.md5}"></div>
+    </div>`
+  ).join('');
+}
+
+async function getPeers(key, btn) {
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const r = await fetch('/api/getfile?key=' + key);
+    const d = await r.json();
+    const el = document.getElementById('peers-' + key);
+    if (!d.peers || !d.peers.length) {
+      el.innerHTML = '<p class="empty">No peers found for this file.</p>';
+    } else {
+      el.innerHTML = d.peers.map(p => `
+        <div class="peer-row-dl">
+          <span class="peer-addr-sm">${p.ip}:${p.port}</span>
+          <button class="btn btn-dl" onclick="download('${key}', ${p.port}, this)">Download All</button>
+          <button class="btn btn-pick" onclick="getPiecesMode('${key}', ${p.port}, this)">Pick Pieces</button>
+        </div>`
+      ).join('');
+    }
+  } catch (e) {
+    document.getElementById('peers-' + key).innerHTML =
+      '<p class="empty">Could not reach tracker.</p>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Refresh Peers';
+  }
+}
+
+async function download(key, port, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Downloading…';
+  try {
+    await fetch('/api/download?key=' + key + '&port=' + port, { method: 'POST' });
+    btn.textContent = 'Started ✓';
+    btn.className = 'btn btn-done';
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Retry';
+  }
+}
+
+document.getElementById('search-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') searchFiles();
+});
+document.getElementById('search-btn').addEventListener('click', searchFiles);
+
+/* ── piece picker ─────────────────────────────────────────────────────────── */
+
+async function getPiecesMode(key, port, btn) {
+  const row = btn.closest('.peer-row-dl');
+  const existing = row.nextElementSibling;
+  if (existing && existing.classList.contains('picker-panel')) {
+    existing.remove();
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const r = await fetch('/api/interested?key=' + key + '&port=' + port);
+    const d = await r.json();
+    const bitmap = d.bitmap || '';
+    if (!bitmap) { btn.textContent = 'No data'; return; }
+    const panel = document.createElement('div');
+    panel.className = 'picker-panel';
+    panel.innerHTML = renderPicker(key, port, bitmap);
+    row.insertAdjacentElement('afterend', panel);
+    selectedPieces[key + ':' + port] = new Set();
+  } catch (e) {
+    btn.textContent = 'Error';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Pick Pieces';
+  }
+}
+
+function renderPicker(key, port, bitmap) {
+  const total = bitmap.length;
+  const cls = total > 512 ? 'sp-sm' : total > 128 ? 'sp-md' : 'sp-lg';
+  const squares = bitmap.split('').map((b, i) =>
+    `<i class="sel-p ${cls} ${b === '1' ? 'avail' : 'unavail'}" data-idx="${i}" onclick="togglePiece('${key}',${port},${i},this)"></i>`
+  ).join('');
+  return `
+    <div class="picker-bar">
+      <button class="btn btn-xs" onclick="selAll('${key}',${port})">All</button>
+      <button class="btn btn-xs" onclick="selNone('${key}',${port})">None</button>
+      <span class="picker-info" id="pi-${key}-${port}">0 selected</span>
+      <button class="btn btn-xs btn-dl" id="dlbtn-${key}-${port}" onclick="dlSelected('${key}',${port})" disabled>Download 0</button>
+    </div>
+    <div class="piece-grid" id="pg-${key}-${port}">${squares}</div>`;
+}
+
+function togglePiece(key, port, idx, el) {
+  const k = key + ':' + port;
+  if (!selectedPieces[k]) selectedPieces[k] = new Set();
+  if (selectedPieces[k].has(idx)) {
+    selectedPieces[k].delete(idx);
+    el.classList.remove('selected');
+  } else {
+    selectedPieces[k].add(idx);
+    el.classList.add('selected');
+  }
+  updateDlBtn(key, port);
+}
+
+function selAll(key, port) {
+  const k = key + ':' + port;
+  if (!selectedPieces[k]) selectedPieces[k] = new Set();
+  const grid = document.getElementById('pg-' + key + '-' + port);
+  if (!grid) return;
+  grid.querySelectorAll('.sel-p.avail').forEach(el => {
+    selectedPieces[k].add(parseInt(el.dataset.idx));
+    el.classList.add('selected');
+  });
+  updateDlBtn(key, port);
+}
+
+function selNone(key, port) {
+  const k = key + ':' + port;
+  selectedPieces[k] = new Set();
+  const grid = document.getElementById('pg-' + key + '-' + port);
+  if (grid) grid.querySelectorAll('.sel-p.selected').forEach(el => el.classList.remove('selected'));
+  updateDlBtn(key, port);
+}
+
+function updateDlBtn(key, port) {
+  const n = (selectedPieces[key + ':' + port] || new Set()).size;
+  const info = document.getElementById('pi-' + key + '-' + port);
+  const btn  = document.getElementById('dlbtn-' + key + '-' + port);
+  if (info) info.textContent = n + ' selected';
+  if (btn)  { btn.textContent = 'Download ' + n; btn.disabled = n === 0; }
+}
+
+async function dlSelected(key, port) {
+  const indexes = [...(selectedPieces[key + ':' + port] || [])].sort((a, b) => a - b);
+  if (!indexes.length) return;
+  const btn = document.getElementById('dlbtn-' + key + '-' + port);
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+  try {
+    await fetch('/api/getpieces?key=' + key + '&port=' + port + '&indexes=' + indexes.join(','), { method: 'POST' });
+    if (btn) { btn.textContent = 'Started ✓'; btn.className = 'btn btn-xs btn-done'; }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Download ' + indexes.length; }
+  }
+}

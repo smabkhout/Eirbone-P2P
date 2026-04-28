@@ -299,6 +299,96 @@ public class Peer {
   public int getPort() { return port; }
   public Map<String, FileMetadata> getManagedFiles() { return managedFiles; }
 
+  /** Returns the raw tracker response for a look query (also updates keyToFilename/Size). */
+  public String lookRaw(String filename) {
+      try {
+          if (trackerOut == null || trackerIn == null) return null;
+          String response = sendTrackerRequest(buildLookByNameRequest(filename));
+          parseLookResponse(response);
+          return response;
+      } catch (IOException e) {
+          return null;
+      }
+  }
+
+  /** Returns the raw tracker response for a getfile query. */
+  public String getFileRaw(String key) {
+      try {
+          if (trackerOut == null || trackerIn == null) return null;
+          return sendTrackerRequest(buildGetFileRequest(key));
+      } catch (IOException e) {
+          return null;
+      }
+  }
+
+  /** Starts downloading all pieces of key from peerPort in a background thread. */
+  public void startDownload(String key, int peerPort) {
+      Thread t = new Thread(() -> {
+          String resp = requestInterested(peerPort, key);
+          if (resp == null || !resp.startsWith("have ")) {
+              System.err.println("[DOWNLOAD] No bitmap from " + peerPort);
+              return;
+          }
+          String[] parts = resp.split("\\s+", 3);
+          if (parts.length < 3) return;
+          try {
+              preRegisterLeech(key);
+              byte[] seederBits = Base64.getDecoder().decode(parts[2]);
+              List<Integer> indexes = new ArrayList<>();
+              for (int i = 0; i < seederBits.length * 8; i++) {
+                  int by = i / 8, bi = 7 - (i % 8);
+                  if ((seederBits[by] & (1 << bi)) != 0) indexes.add(i);
+              }
+              if (indexes.isEmpty()) return;
+              System.out.println("[DOWNLOAD] " + indexes.size() + " pieces of " + key + " from :" + peerPort);
+              requestPieces(peerPort, key, indexes);
+              checkDownloadComplete(key);
+          } catch (IllegalArgumentException e) {
+              System.err.println("[DOWNLOAD] Bitmap error: " + e.getMessage());
+          }
+      }, "dl-" + key.substring(0, Math.min(8, key.length())));
+      t.setDaemon(true);
+      t.start();
+  }
+
+  /** Downloads only the specified pieces of key from peerPort in a background thread. */
+  public void downloadPieces(String key, int peerPort, List<Integer> indexes) {
+      Thread t = new Thread(() -> {
+          preRegisterLeech(key);
+          System.out.println("[DOWNLOAD] " + indexes.size() + " selected pieces of " + key + " from :" + peerPort);
+          requestPieces(peerPort, key, indexes);
+          checkDownloadComplete(key);
+      }, "dlp-" + key.substring(0, Math.min(8, key.length())));
+      t.setDaemon(true);
+      t.start();
+  }
+
+  private void preRegisterLeech(String key) {
+      if (managedFiles.containsKey(key)) return;
+      String fname = keyToFilename.getOrDefault(key, key + ".part");
+      long   size  = keyToSize.getOrDefault(key, 0L);
+      FileMetadata fm = new FileMetadata(key, "/tmp/" + fname, size, FileState.LEECH);
+      managedFiles.put(key, fm);
+  }
+
+  private void checkDownloadComplete(String key) {
+      FileMetadata fm = managedFiles.get(key);
+      if (fm == null) return;
+      int total = (int)((fm.getSize() + 1023) / 1024);
+      if (total == 0) return;
+      String b64 = fm.getBufferMap();
+      if (b64 == null || b64.isEmpty()) return;
+      try {
+          byte[] myBits = Base64.getDecoder().decode(b64);
+          int got = 0;
+          for (byte b : myBits) got += Integer.bitCount(b & 0xFF);
+          if (got >= total) {
+              fm.setState(FileState.SEED);
+              System.out.println("[DOWNLOAD] Complete: " + fm.getFileName());
+          }
+      } catch (IllegalArgumentException ignored) {}
+  }
+
   private String getSeedList() {
     StringBuilder sb = new StringBuilder("[");
     for (FileMetadata fm : managedFiles.values()) {
