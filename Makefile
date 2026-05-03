@@ -24,7 +24,7 @@ run-java: java
 	cd java && java -cp bin Main $(ARGS)
 
 rapport:
-	pdflatex rapport/rapport_projet.tex
+	pdflatex rapport/rapport_final.tex
 
 clean:
 	rm -rf java/bin tracker test_c *.aux *.log *.pdf *.toc *.out

@@ -1,0 +1,384 @@
+\documentclass[12pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\geometry{margin=2cm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tabularx}
+\usepackage{float}
+
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codekey}{RGB}{0,0,200}
+\definecolor{codecomment}{RGB}{80,120,80}
+\definecolor{codestring}{RGB}{160,0,0}
+
+\lstset{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{codekey}\bfseries,
+  commentstyle=\color{codecomment}\itshape,
+  stringstyle=\color{codestring},
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{gray!40},
+  numbers=none,
+  xleftmargin=1em,
+  framexleftmargin=0.5em,
+}
+
+\begin{document}
+
+% ─────────────────────────────────────────────────────────────────
+%  PAGE DE GARDE
+% ─────────────────────────────────────────────────────────────────
+\begin{titlepage}
+\centering
+\vspace*{1cm}
+
+{\Huge \textbf{Rapport final : Eirbone}} \\[0.5cm]
+{\Large Application d'échange de gros fichiers en Pair à Pair (P2P)} \\[1.5cm]
+
+\IfFileExists{img/enseirb.png}{
+  \includegraphics[width=0.4\textwidth]{img/enseirb.png} \\[2cm]
+}{\IfFileExists{rapport/img/enseirb.png}{
+  \includegraphics[width=0.4\textwidth]{rapport/img/enseirb.png} \\[2cm]
+}{
+  \vspace{2cm}
+}}
+
+\textbf{Auteurs :} \\
+MABKHOUT Salah-Eddine \\
+MIGAOU Mohamed Aziz \\
+BENBAKI Anas \\
+DAMMOU Adam \\[1.5cm]
+
+\textbf{Date :} \today \\[2cm]
+
+\LARGE \textbf{ENSEIRB-MATMECA} \\[1.5cm]
+
+\vfill
+{\large Année 2025-2026}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% ─────────────────────────────────────────────────────────────────
+%  1. INTRODUCTION
+% ─────────────────────────────────────────────────────────────────
+\section{Introduction}
+
+Ce rapport présente l'implémentation finale du projet Eirbone, une application
+d'échange de gros fichiers en mode Pair à Pair (P2P). L'architecture retenue
+repose sur un tracker centralisé développé en C et des peers développés en Java,
+communicant via un protocole texte normalisé sur TCP. Par rapport au rapport
+intermédiaire, toutes les fonctionnalités prioritaires ont été implémentées et
+le système est désormais complet, testé et doté d'interfaces web pour les deux
+composants.
+
+Les livrables finaux sont :
+\begin{itemize}[leftmargin=1.2cm]
+  \item un tracker C gérant \texttt{announce}, \texttt{look}, \texttt{getfile},
+        \texttt{update}, avec multiplexage \texttt{select()} et dashboard HTTP ;
+  \item un peer Java implémentant le protocole pair-à-pair complet
+        (\texttt{interested}/\texttt{have}, \texttt{getpieces}/\texttt{data},
+        \texttt{have} périodique, \texttt{update} périodique vers le tracker) ;
+  \item deux interfaces web temps réel (tracker et peer) avec visualisation
+        bitmap des pièces ;
+  \item des tests unitaires côté C (\texttt{handlersTest.c}) et côté Java
+        (\texttt{PeerProtocolTest.java}) ;
+  \item un fichier de configuration \texttt{config.ini} pour les deux composants ;
+  \item un fichier de logs pour suivre les erreurs si besoin.
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────
+%  2. ARCHITECTURE GÉNÉRALE
+% ─────────────────────────────────────────────────────────────────
+\section{Architecture générale}
+
+\subsection{Vue d'ensemble}
+
+Le système Eirbone est organisé autour de trois types d'entités :
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{Le Tracker (C)} : serveur central qui maintient l'état de tous
+        les peers connectés et répond aux requêtes de signalisation ;
+  \item \textbf{Le Peer (Java)} : client P2P qui annonce ses fichiers, recherche
+        des sources et transfère des pièces directement avec ses voisins ;
+  \item \textbf{Les interfaces web} : dashboards HTTP embarqués dans chaque
+        composant, accessibles via un navigateur pour visualiser l'activité en
+        temps réel.
+\end{itemize}
+
+\subsection{Structure des modules}
+
+\begin{table}[H]
+\centering
+\begin{tabularx}{\textwidth}{l l X}
+\toprule
+\textbf{Composant} & \textbf{Fichier(s)} & \textbf{Rôle} \\
+\midrule
+Tracker C & \texttt{tracker.c / tracker.h} & Table des peers, handlers protocole \\
+          & \texttt{peer.c / peer.h}        & État d'un pair (IP, port, listes seed/leech) \\
+          & \texttt{file.c / file.h}        & Métadonnées fichier + comptage de références \\
+          & \texttt{http.c / http.h}        & Serveur HTTP embarqué + log circulaire \\
+          & \texttt{main.c}                 & Boucle \texttt{select()}, dispatch commandes \\
+\midrule
+Peer Java & \texttt{Peer.java}              & Logique réseau P2P complète \\
+          & \texttt{FileMetadata.java}      & Métadonnées locales + état \texttt{SEED/LEECH} \\
+          & \texttt{PeerDiscovery.java}     & Parsing réponse \texttt{peers []} \\
+          & \texttt{PeerDashboard.java}     & Serveur HTTP embarqué (dashboard peer) \\
+          & \texttt{Main.java}              & calcul MD5, lancement \\
+\midrule
+Interfaces & \texttt{www/tracker.*}         & Dashboard tracker (peers, log, stats) \\
+           & \texttt{www/peer.*}            & Dashboard peer (seeding, leeching, recherche) \\
+\bottomrule
+\end{tabularx}
+\caption{Organisation des modules}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────
+%  3. IMPLÉMENTATION C — TRACKER
+% ─────────────────────────────────────────────────────────────────
+\section{Implémentation en C : le Tracker}
+
+\subsection{Modèle de données}
+
+Le tracker maintient un tableau fixe de \texttt{MAX\_PEERS} pointeurs vers des
+structures \texttt{peer\_t}. Chaque pair possède deux tableaux de
+\texttt{MAX\_FILES} pointeurs vers des structures \texttt{file\_t} : l'un pour
+les fichiers seedés, l'autre pour les fichiers leeachés.
+
+La gestion mémoire des fichiers repose sur un système de \textbf{comptage de
+références} (\texttt{fileRetain} / \texttt{fileRelease}) : un objet
+\texttt{file\_t} n'est libéré que lorsque plus aucun peer ne le référence. Cela
+permet à plusieurs peers de partager le même objet \texttt{file\_t} en mémoire
+sans copie ni double libération.
+
+\subsection{Multiplexage avec \texttt{select()}}
+
+Le serveur tracker gère toutes les connexions dans un \textbf{unique thread}
+grâce à \texttt{select()}. À chaque itération de la boucle principale, le tracker reconstruit un ensemble de descripteurs (\texttt{fd\_set}) comprenant le socket serveur et tous les sockets clients actifs. \texttt{select()} bloque jusqu'à ce qu'une activité soit détectée sur l'un d'eux :
+
+\begin{itemize}
+    \item \textbf{Activité sur le socket serveur} $\rightarrow$ nouvelle
+    connexion: \texttt{accept()} puis création du peer dans la table du tracker ;
+
+    \item \textbf{Activité sur un socket client} $\rightarrow$ message entrant:
+    accumulation dans un buffer par client, extraction des lignes terminées par \texttt{\textbackslash n}, délégation vers le handler correspondant puis envoi de la réponse ;
+
+    \item \textbf{\texttt{recv()} retourne 0 ou $-1$} $\rightarrow$
+    déconnexion : libération du slot et suppression du peer.
+\end{itemize}
+
+Ce choix évite la création d'un thread par client et limite les problèmes de concurrence, tout en respectant les contraintes de \textit{message framing} sur TCP.
+
+
+\subsection{Handlers du protocole Pair-Tracker}
+
+\begin{description}[leftmargin=1.2cm]
+  \item[\texttt{handleAnnounce}] Enregistre le port d'écoute du pair et ses
+        listes seed/leech initiales. Appelle \texttt{clearPeerFileLists()} pour
+        remplacer l'état précédent. Retourne \texttt{ok\textbackslash n}.
+  \item[\texttt{handleLook}] Applique les critères \texttt{filename=} et
+        \texttt{filesize>} sur tous les fichiers connus du réseau, déduplique
+        par clé MD5, et retourne \texttt{list [...]}.
+  \item[\texttt{handleGetfile}] Parcourt tous les peers et retourne ceux qui
+        possèdent la clé MD5 demandée (seed ou leech), avec leur IP et port
+        d'écoute.
+  \item[\texttt{handleUpdate}] Remplace atomiquement les listes seed/leech d'un
+        pair en conservant les objets \texttt{file\_t} déjà connus
+        (\texttt{collectPeerKnownFiles} avant \texttt{clearPeerFileLists}).
+        Retourne \texttt{ok\textbackslash n}.
+\end{description}
+
+\subsection{Dashboard HTTP}
+
+Le dashboard du tracker est un serveur HTTP minimal en C intégré au même
+processus que le tracker. Il écoute sur \texttt{portTracker + 1} et gère :
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{GET /api/state} $\rightarrow$ JSON avec la liste des peers
+        connectés (IP, port, nombre de fichiers seedés/leeachés, statut) et les
+        50 dernières entrées du log circulaire horodaté ;
+  \item \texttt{GET /}, \texttt{/tracker.css}, \texttt{/tracker.js}
+        $\rightarrow$ fichiers statiques servis depuis \texttt{www/}.
+\end{itemize}
+
+Le log est un buffer circulaire de 50 entrées (\texttt{LOG\_MAX}) géré par
+\texttt{tracker\_log()}, qui écrit simultanément sur \texttt{stdout} et dans le
+buffer. Chaque entrée est horodatée au format \texttt{HH:MM:SS}.
+
+% ─────────────────────────────────────────────────────────────────
+%  4. IMPLÉMENTATION JAVA — PEER
+% ─────────────────────────────────────────────────────────────────
+\section{Implémentation en Java : le Peer}
+
+\subsection{Architecture de \texttt{Peer.java}}
+
+La classe \texttt{Peer} centralise toute la logique réseau. Elle distingue
+deux flux de communication :
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \textbf{Flux Pair-Tracker} : connexion TCP vers le tracker,
+        protégée par un verrou \texttt{trackerIoLock}.
+        Utilisée pour \texttt{announce}, \texttt{look}, \texttt{getfile} et
+        \texttt{update} périodique ;
+  \item \textbf{Flux Pair-Pair} :Une écoute locale via \texttt{ServerSocket} pour accepter les connexions entrantes d'autres peers et traiter les requêtes de disponibilité et de transfert de pièces.
+\end{itemize}
+
+\subsection{Gestion des métadonnées : \texttt{FileMetadata}}
+
+Chaque fichier géré localement est représenté par un objet
+\texttt{FileMetadata} stocké dans une \texttt{HashMap<String, FileMetadata>}
+indexée par hash MD5. L'objet contient le chemin local, la taille, le
+\textbf{buffermap encodé en Base64} et un état parmi trois valeurs de
+l'enum \texttt{FileState} :
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item \texttt{SEED} : le pair possède la totalité du fichier ;
+  \item \texttt{LEECH} : le pair possède une partie des pièces (buffermap non
+        plein) ;
+  \item \texttt{NONE} : état neutre (pas encore de données).
+\end{itemize}
+
+% \subsection{Protocole Pair-Pair : \texttt{interested} / \texttt{have}}
+
+% À la réception d'un message \texttt{interested <key>}, le peer calcule son
+% buffermap via \texttt{computeBufferMapBase64(key)} :
+% \begin{itemize}[leftmargin=1.2cm]
+%   \item si l'état est \texttt{SEED}, tous les bits sont mis à 1 ;
+%   \item si l'état est \texttt{LEECH}, le buffermap stocké est renvoyé
+%         directement.
+% \end{itemize}
+
+% La réponse \texttt{have <key> <buffermap\_base64>} est envoyée sur le même
+% socket.
+
+% \subsection{Protocole Pair-Pair : \texttt{getpieces} / \texttt{data}}
+
+% À la réception de \texttt{getpieces <key> [idx1 idx2 ...]}, le peer :
+% \begin{enumerate}[leftmargin=1.2cm]
+%   \item vérifie la disponibilité de chaque pièce via \texttt{hasPiece()}
+%   \item lit chaque pièce depuis le fichier local et construit le header textuel \texttt{data <key> [idx len ...]\textbackslash n}
+%         puis envoie le payload binaire concaténé.
+% \end{enumerate}
+
+À la réception d'une réponse \texttt{data}, le peer récepteur sauvegarde les
+pièces reçues dans un \texttt{RandomAccessFile} local, met à jour le buffermap,
+passe son état à \texttt{LEECH}, et émet le prochain \texttt{update} vers le
+tracker lors du cycle périodique suivant.
+
+\section{Connexion entre la partie C et la partie Java}
+
+La connexion entre tracker (C) et peer (Java) est réalisée via une socket TCP. Le protocole est entièrement textuel sauf pour le payload binaire des
+pièces dans \texttt{getpieces}/\texttt{data}.
+
+L'échange de bout en bout est le suivant :
+
+\begin{enumerate}[leftmargin=1.2cm]
+  \item Le peer Java ouvre une connexion TCP vers le tracker C ;
+  \item Il envoie \texttt{announce listen <port> seed [...] leech [...]} et
+        reçoit \texttt{ok} ;
+  \item Il envoie \texttt{look [filename=<nom>]} et reçoit
+        \texttt{list [...]} ;
+  \item Il envoie \texttt{getfile <key>} et reçoit
+        \texttt{peers <key> [ip:port ...]} ;
+  \item Il initie les échanges Pair-Pair \texttt{interested} $\rightarrow$
+        \texttt{have} puis \texttt{getpieces} $\rightarrow$ \texttt{data} ;
+  \item Périodiquement, il envoie \texttt{update seed [...] leech [...]} pour
+        informer le tracker de son état courant.
+\end{enumerate}
+
+
+\section{Interfaces web}
+
+\subsection{Dashboard Tracker}
+
+Le dashboard tracker (\texttt{tracker.html/css/js}) interroge \texttt{/api/state}
+toutes les 2 secondes et affiche :
+\begin{itemize}[leftmargin=1.2cm]
+  \item un tableau des peers connectés avec leur IP, port, nombre de fichiers
+        seedés/leeachés et un badge coloré (\texttt{seed}, \texttt{leech},
+        \texttt{both}, \texttt{standby}) ;
+  \item un panneau de log en temps réel avec color-coding par type d'événement
+        (\texttt{[CONNECT]} en vert, \texttt{[DISCONNECT]} en orange,
+        \texttt{[ERROR]} en rouge, \texttt{[TRACKER]} en cyan) ;
+  \item un indicateur ``live'' avec point animé.
+\end{itemize}
+
+\subsection{Dashboard Peer}
+
+Le dashboard peer (\texttt{peer.html/css/js}) est l'interface la plus élaborée.
+Il offre :
+
+\begin{itemize}[leftmargin=1.2cm]
+  \item la visualisation de l'état de seeding (fichiers complets ou partiels)
+        et de leeching avec \textbf{visualisation bitmap pixel-perfect} : chaque
+        pièce est représentée par un carré coloré (vert = possédée, gris =
+        manquante), avec taille adaptative selon le nombre total de pièces
+        (\texttt{p-sm}/\texttt{p-md}/\texttt{p-lg}) ;
+  \item une barre de progression animée (transition CSS \texttt{width 0.4s ease})
+        et un pourcentage ;
+  \item un moteur de recherche de fichiers via \texttt{look} avec affichage des
+        résultats et des peers disponibles ;
+  \item un bouton de téléchargement automatique par peer (workflow
+        \texttt{getfile} $\rightarrow$ \texttt{startDownload}) ;
+  \item un \textbf{sélecteur de pièces interactif} (``Pick Pieces'') : après
+        interrogation du buffermap d'un peer via \texttt{interested}, un panneau
+        affiche toutes les pièces disponibles sous forme de grille cliquable ;
+        l'utilisateur peut sélectionner manuellement les pièces à récupérer avant
+        de lancer \texttt{getpieces}.
+\end{itemize}
+
+\section{Tests}
+
+\subsection{Tests unitaires C : \texttt{handlersTest.c}}
+
+Quatre fonctions de test couvrent l'ensemble des handlers du tracker :
+\texttt{test\_handleAnnounce}, \texttt{test\_handleLook},
+\texttt{test\_handleGetfile} et \texttt{test\_handleUpdate}.
+Chacune valide le comportement nominal ainsi que les cas limites
+(commandes malformées, clé inconnue, remplacement des listes après
+\texttt{update}).
+
+\subsection{Tests d'intégration Java : \texttt{PeerProtocolTest.java}}
+
+Trois tests instancient deux peers réels sur des ports libres
+et valident le protocole pair-à-pair : échange \texttt{interested}/\texttt{have}
+avec vérification du buffermap Base64, transfert \texttt{getpieces}/\texttt{data}
+avec contrôle octet par octet du payload, et persistance sur disque des pièces
+reçues avec mise à jour correcte de l'état \texttt{LEECH} et du message
+\texttt{update} suivant.
+\section{Retour d'expérience : utilisation de LLM}
+
+Conformément aux recommandations du sujet, nous avons utilisé des LLM comme outils d'assistance pendant le développement. Spécialement pour le \textbf{Parsing de commandes en C} en générant des squelettes \texttt{strtok\_r} pour le découpage des messages du protocole, que nous avons ensuite adaptés à nos structures et cas limites.
+
+Dans tous les cas, le code généré a été relu, compris, modifié et intégré manuellement. Aucun module entier n'a été utilisé tel quel sans adaptation.
+
+\section{Conclusion}
+
+Le projet Eirbone est pleinement fonctionnel. Le protocole défini dans le sujet est intégralement implémenté : annonce, recherche, récupération de liste de peers, échanges de pièces, mises à jour périodiques. L'ensemble est validé par
+des tests unitaires et d'intégration, et observable via deux dashboards web temps réel.
+\begin{thebibliography}{9}
+\bibitem{sujet}
+Sujet du projet Eirbone,
+Application d'échange de gros fichiers en Pair à Pair (P2P),
+ENSEIRB-MATMECA, 2026.
+\url{https://docs.google.com/document/d/1pVstbLaBM799hkpQIrmlGGNOBi47V-m/edit}
+
+\bibitem{select}
+Alexey N. Chernyshov,
+Exemple d'utilisation de \texttt{select()} pour serveur multi-clients en C,
+GitHub.
+\url{https://gist.github.com/Alexey-N-Chernyshov/4634731}
+
+\end{thebibliography}
+
+\end{document}
