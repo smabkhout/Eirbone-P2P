@@ -74,6 +74,41 @@ setInterval(poll, 2000);
 
 const selectedPieces = {};
 
+const seedInput = document.getElementById('seed-input');
+const seedBtn = document.getElementById('seed-btn');
+const seedStatus = document.getElementById('seed-status');
+
+async function addFileToPeer() {
+  const file = seedInput.files && seedInput.files[0];
+  if (!file) {
+    seedStatus.textContent = 'Choose a file first.';
+    return;
+  }
+
+  const url = '/api/seed?name=' + encodeURIComponent(file.name);
+
+  seedBtn.disabled = true;
+  seedBtn.textContent = 'Uploading…';
+  seedStatus.textContent = 'Uploading ' + file.name + '…';
+
+  try {
+    const r = await fetch(url, { method: 'POST', body: file });
+    const d = await r.json();
+    if (d.status === 'started') {
+      seedStatus.textContent = 'Added ' + d.filename + ' (' + d.md5.slice(0, 8) + '…)';
+      seedInput.value = '';
+      await poll();
+    } else {
+      seedStatus.textContent = 'Upload failed.';
+    }
+  } catch (e) {
+    seedStatus.textContent = 'Upload failed.';
+  } finally {
+    seedBtn.disabled = false;
+    seedBtn.textContent = 'Add File to Peer';
+  }
+}
+
 async function searchFiles() {
   const q = document.getElementById('search-input').value.trim();
   if (!q) return;
@@ -155,6 +190,7 @@ document.getElementById('search-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') searchFiles();
 });
 document.getElementById('search-btn').addEventListener('click', searchFiles);
+seedBtn.addEventListener('click', addFileToPeer);
 
 /* ── piece picker ─────────────────────────────────────────────────────────── */
 

@@ -1,6 +1,7 @@
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -18,6 +19,24 @@ public class Peer {
     private final Object trackerIoLock = new Object();
     private Thread periodicUpdateThread;
     private volatile boolean periodicUpdateRunning;
+    private Thread periodicPeerExchangeThread;
+    private volatile boolean periodicPeerExchangeRunning;
+    private long trackerUpdateIntervalMs = 10000L;
+    private long peerExchangeIntervalMs = 5000L;
+
+    private static final class PeerEndpoint {
+      private final String ip;
+      private final int port;
+
+      private PeerEndpoint(String ip, int port) {
+        this.ip = ip;
+        this.port = port;
+      }
+
+      private String id() {
+        return ip + ":" + port;
+      }
+    }
     
     // Clé = Hash MD5 du fichier, Valeur = Détails (chemin, taille, pièces...)
     private Map<String, FileMetadata> managedFiles;
@@ -67,6 +86,8 @@ public class Peer {
 
         if (header.startsWith("interested ")) {
           handleInterested(header, out);
+        } else if (header.startsWith("have ")) {
+          handleHaveExchange(header, out);
         } else if (header.startsWith("getpieces ")) {
           handleGetPieces(header, out);
         } else {
@@ -101,6 +122,27 @@ public class Peer {
     String key = parts[1].trim();
     String buffermap = computeBufferMapBase64(key);
     String response = "have " + key + " " + buffermap + "\n";
+    out.write(response.getBytes(StandardCharsets.UTF_8));
+    out.flush();
+  }
+
+  private void handleHaveExchange(String header, BufferedOutputStream out)
+      throws IOException {
+    String[] parts = header.split(" ", 3);
+    if (parts.length < 3) {
+      out.write("have unknown \n".getBytes(StandardCharsets.UTF_8));
+      out.flush();
+      return;
+    }
+
+    String key = parts[1].trim();
+    if (key.isEmpty()) {
+      out.write("have unknown \n".getBytes(StandardCharsets.UTF_8));
+      out.flush();
+      return;
+    }
+
+    String response = "have " + key + " " + computeBufferMapBase64(key) + "\n";
     out.write(response.getBytes(StandardCharsets.UTF_8));
     out.flush();
   }
@@ -178,6 +220,16 @@ public class Peer {
       }
     }
     return Base64.getEncoder().encodeToString(bits);
+  }
+
+  public void configureIntervals(long trackerUpdateIntervalMs,
+                                 long peerExchangeIntervalMs) {
+    if (trackerUpdateIntervalMs > 0) {
+      this.trackerUpdateIntervalMs = trackerUpdateIntervalMs;
+    }
+    if (peerExchangeIntervalMs > 0) {
+      this.peerExchangeIntervalMs = peerExchangeIntervalMs;
+    }
   }
 
   private boolean hasPiece(FileMetadata fm, int idx) {
@@ -275,6 +327,24 @@ public class Peer {
     return total;
   }
 
+  private List<Integer> extractDataIndexes(String header) {
+    List<Integer> indexes = new ArrayList<>();
+    int start = header.indexOf('[');
+    int end = header.indexOf(']');
+    if (start < 0 || end < 0 || end <= start)
+      return indexes;
+
+    String[] tokens = header.substring(start + 1, end).trim().split("\\s+");
+    // Format: [index size index size ...]
+    for (int i = 0; i + 1 < tokens.length; i += 2) {
+      try {
+        indexes.add(Integer.parseInt(tokens[i]));
+      } catch (NumberFormatException ignored) {
+      }
+    }
+    return indexes;
+  }
+
   private byte[] readExactBytes(BufferedInputStream in, int length)
       throws IOException {
     byte[] buffer = new byte[length];
@@ -293,6 +363,107 @@ public class Peer {
     FileMetadata fm = new FileMetadata(MD5hash, path, size);
     fm.setState(state);
     this.managedFiles.put(MD5hash, fm);
+    keyToFilename.putIfAbsent(MD5hash, fm.getFileName());
+    keyToSize.putIfAbsent(MD5hash, size);
+  }
+
+  public synchronized FileMetadata addSeedFile(String originalName,
+                                               String targetPath,
+                                               byte[] content)
+      throws IOException {
+    if (content == null) {
+      throw new IllegalArgumentException("content cannot be null");
+    }
+
+    String safeName = originalName == null || originalName.trim().isEmpty()
+        ? "shared-file.bin"
+        : new File(originalName).getName();
+    File targetFile = resolvePathInPeerDirectory(targetPath, safeName);
+    File parent = targetFile.getParentFile();
+    if (parent != null && !parent.exists()) {
+      parent.mkdirs();
+    }
+
+    try (FileOutputStream out = new FileOutputStream(targetFile)) {
+      out.write(content);
+    }
+
+    String hash = md5Hex(content);
+    FileMetadata fm = new FileMetadata(hash, targetFile.getAbsolutePath(),
+                                       content.length, FileState.SEED);
+    managedFiles.put(hash, fm);
+    keyToFilename.put(hash, fm.getFileName());
+    keyToSize.put(hash, (long)content.length);
+    return fm;
+  }
+
+  private File getPeerStorageDirectory() {
+    File dir = new File("peer_data", "peer_" + this.port);
+    if (!dir.exists()) {
+      dir.mkdirs();
+    }
+    return dir;
+  }
+
+  private File resolvePathInPeerDirectory(String requestedPath,
+                                          String defaultFileName)
+      throws IOException {
+    File baseDir = getPeerStorageDirectory();
+
+    File target;
+    if (requestedPath == null || requestedPath.trim().isEmpty()) {
+      target = new File(baseDir, defaultFileName);
+    } else {
+      String raw = requestedPath.trim().replace('\\', '/');
+      while (raw.startsWith("/")) {
+        raw = raw.substring(1);
+      }
+      if (raw.isEmpty()) {
+        raw = defaultFileName;
+      }
+
+      File candidate = new File(baseDir, raw);
+      boolean asDirectory = requestedPath.endsWith("/") ||
+                            requestedPath.endsWith("\\") ||
+                            (candidate.exists() && candidate.isDirectory());
+      target = asDirectory ? new File(candidate, defaultFileName) : candidate;
+    }
+
+    String baseCanonical = baseDir.getCanonicalPath();
+    String targetCanonical = target.getCanonicalPath();
+    if (!targetCanonical.equals(baseCanonical) &&
+        !targetCanonical.startsWith(baseCanonical + File.separator)) {
+      throw new IllegalArgumentException(
+          "Path must stay inside peer storage directory");
+    }
+
+    return target;
+  }
+
+  private String md5Hex(byte[] content) {
+    try {
+      MessageDigest md = MessageDigest.getInstance("MD5");
+      byte[] digest = md.digest(content);
+      StringBuilder sb = new StringBuilder();
+      for (byte b : digest) {
+        sb.append(String.format("%02x", b));
+      }
+      return sb.toString();
+    } catch (Exception e) {
+      throw new RuntimeException("Unable to compute MD5", e);
+    }
+  }
+
+  public void refreshTrackerNow() {
+    try {
+      if (trackerOut == null || trackerIn == null) {
+        return;
+      }
+      String updateReq = buildUpdateRequest();
+      sendTrackerRequest(updateReq);
+    } catch (IOException e) {
+      AppLogger.warn("[UPDATE] Unable to refresh tracker: " + e.getMessage());
+    }
   }
 
   public String getIpAddress() { return ip; }
@@ -326,7 +497,7 @@ public class Peer {
       Thread t = new Thread(() -> {
           String resp = requestInterested(peerPort, key);
           if (resp == null || !resp.startsWith("have ")) {
-              System.err.println("[DOWNLOAD] No bitmap from " + peerPort);
+          AppLogger.warn("[DOWNLOAD] No bitmap from " + peerPort);
               return;
           }
           String[] parts = resp.split("\\s+", 3);
@@ -340,11 +511,11 @@ public class Peer {
                   if ((seederBits[by] & (1 << bi)) != 0) indexes.add(i);
               }
               if (indexes.isEmpty()) return;
-              System.out.println("[DOWNLOAD] " + indexes.size() + " pieces of " + key + " from :" + peerPort);
+                AppLogger.info("[DOWNLOAD] " + indexes.size() + " pieces of " + key + " from :" + peerPort);
               requestPieces(peerPort, key, indexes);
               checkDownloadComplete(key);
           } catch (IllegalArgumentException e) {
-              System.err.println("[DOWNLOAD] Bitmap error: " + e.getMessage());
+                AppLogger.error("[DOWNLOAD] Bitmap error: " + e.getMessage());
           }
       }, "dl-" + key.substring(0, Math.min(8, key.length())));
       t.setDaemon(true);
@@ -355,7 +526,7 @@ public class Peer {
   public void downloadPieces(String key, int peerPort, List<Integer> indexes) {
       Thread t = new Thread(() -> {
           preRegisterLeech(key);
-          System.out.println("[DOWNLOAD] " + indexes.size() + " selected pieces of " + key + " from :" + peerPort);
+        AppLogger.info("[DOWNLOAD] " + indexes.size() + " selected pieces of " + key + " from :" + peerPort);
           requestPieces(peerPort, key, indexes);
           checkDownloadComplete(key);
       }, "dlp-" + key.substring(0, Math.min(8, key.length())));
@@ -367,7 +538,8 @@ public class Peer {
       if (managedFiles.containsKey(key)) return;
       String fname = keyToFilename.getOrDefault(key, key + ".part");
       long   size  = keyToSize.getOrDefault(key, 0L);
-      FileMetadata fm = new FileMetadata(key, "/tmp/" + fname, size, FileState.LEECH);
+      File target = new File(getPeerStorageDirectory(), fname);
+      FileMetadata fm = new FileMetadata(key, target.getAbsolutePath(), size, FileState.LEECH);
       managedFiles.put(key, fm);
   }
 
@@ -384,7 +556,7 @@ public class Peer {
           for (byte b : myBits) got += Integer.bitCount(b & 0xFF);
           if (got >= total) {
               fm.setState(FileState.SEED);
-              System.out.println("[DOWNLOAD] Complete: " + fm.getFileName());
+              AppLogger.info("[DOWNLOAD] Complete: " + fm.getFileName());
           }
       } catch (IllegalArgumentException ignored) {}
   }
@@ -436,6 +608,146 @@ public class Peer {
         String seeds = getSeedKeyList();
         String leeches = getLeechList();
         return String.format("update seed %s leech %s\n", seeds, leeches);
+    }
+
+    private List<PeerEndpoint> parsePeerListResponse(String response) {
+      List<PeerEndpoint> peers = new ArrayList<>();
+      if (response == null || !response.startsWith("peers ")) {
+        return peers;
+      }
+
+      int start = response.indexOf('[');
+      int end = response.lastIndexOf(']');
+      if (start < 0 || end < 0 || end <= start) {
+        return peers;
+      }
+
+      String body = response.substring(start + 1, end).trim();
+      if (body.isEmpty()) {
+        return peers;
+      }
+
+      for (String token : body.split("\\s+")) {
+        String[] parts = token.split(":", 2);
+        if (parts.length != 2) {
+          continue;
+        }
+        try {
+          peers.add(new PeerEndpoint(parts[0], Integer.parseInt(parts[1])));
+        } catch (NumberFormatException ignored) {
+        }
+      }
+      return peers;
+    }
+
+    private List<String> getLeechKeys() {
+      List<String> keys = new ArrayList<>();
+      for (FileMetadata fm : managedFiles.values()) {
+        if (fm.getState() == FileState.LEECH) {
+          keys.add(fm.getHash());
+        }
+      }
+      return keys;
+    }
+
+    private void startPeriodicPeerExchange(long periodMs) {
+      if (periodMs <= 0) {
+        return;
+      }
+      synchronized (trackerIoLock) {
+        if (periodicPeerExchangeThread != null && periodicPeerExchangeThread.isAlive()) {
+          return;
+        }
+        periodicPeerExchangeRunning = true;
+        periodicPeerExchangeThread = new Thread(() -> {
+          while (periodicPeerExchangeRunning) {
+            try {
+              Thread.sleep(periodMs);
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              break;
+            }
+
+            try {
+              exchangeBuffermapsWithNeighbors();
+            } catch (IOException e) {
+              AppLogger.warn("[PEER-UPDATE] Stopped periodic peer exchange: " + e.getMessage());
+              break;
+            }
+          }
+          periodicPeerExchangeRunning = false;
+        });
+        periodicPeerExchangeThread.setName("peer-buffermap-exchange-" + this.port);
+        periodicPeerExchangeThread.setDaemon(true);
+        periodicPeerExchangeThread.start();
+      }
+    }
+
+    private void exchangeBuffermapsWithNeighbors() throws IOException {
+      if (trackerOut == null || trackerIn == null) {
+        return;
+      }
+
+      for (String key : getLeechKeys()) {
+        String peersResponse = getFileRaw(key);
+        List<PeerEndpoint> peers = parsePeerListResponse(peersResponse);
+        if (peers.isEmpty()) {
+          continue;
+        }
+
+        String localBuffermap = computeBufferMapBase64(key);
+        for (PeerEndpoint endpoint : peers) {
+          boolean isSelf = false;
+          try {
+            InetAddress ep = InetAddress.getByName(endpoint.ip);
+            InetAddress me = InetAddress.getLocalHost();
+            if (endpoint.port == this.port && (ep.isLoopbackAddress() || ep.equals(me) || ep.isAnyLocalAddress())) {
+              isSelf = true;
+            } else if (endpoint.port == this.port) {
+              String epAddr = ep.getHostAddress();
+              if (this.ip.equals(epAddr) || endpoint.id().equals(this.ip + ":" + this.port)) {
+                isSelf = true;
+              }
+            }
+          } catch (UnknownHostException e) {
+            if (endpoint.port == this.port && (this.ip.equals(endpoint.ip) || endpoint.id().equals(this.ip + ":" + this.port))) {
+              isSelf = true;
+            }
+          }
+
+          if (isSelf) {
+            continue;
+          }
+
+          String response = exchangeHaveWithPeer(endpoint, key, localBuffermap);
+          if (response != null && response.startsWith("have ")) {
+            String[] parts = response.split("\\s+", 3);
+            if (parts.length == 3) {
+
+              // AppLogger.info("[PEER-UPDATE] " + endpoint.id() + " -> " + key + " " + parts[2]);
+              AppLogger.info("[PEER-UPDATE] " + endpoint.id() + " -> " + key + " (buffermap omitted)");
+            }
+          }
+        }
+      }
+    }
+
+    private String exchangeHaveWithPeer(PeerEndpoint endpoint, String key,
+                                        String localBuffermap) {
+      try (Socket socket = new Socket(endpoint.ip, endpoint.port);
+           BufferedOutputStream out =
+               new BufferedOutputStream(socket.getOutputStream());
+           BufferedInputStream in =
+               new BufferedInputStream(socket.getInputStream())) {
+
+        out.write(("have " + key + " " + localBuffermap + "\n")
+                      .getBytes(StandardCharsets.UTF_8));
+        out.flush();
+        return readAsciiLine(in);
+      } catch (IOException e) {
+        AppLogger.warn("[PEER-UPDATE] " + endpoint.id() + " unreachable: " + e.getMessage());
+        return null;
+      }
     }
 
   public String buildLookRequest(List<String> criteria) {
@@ -515,7 +827,12 @@ public class Peer {
             int payloadSize = extractTotalPayloadSize(header);
             byte[] payload = readExactBytes(in, payloadSize);
             if (payload != null) {
-                recordReceivedPieces(key, indexes, payload);
+            List<Integer> receivedIndexes = extractDataIndexes(header);
+            if (receivedIndexes.isEmpty()) {
+              // Fallback for malformed/legacy headers.
+              receivedIndexes = indexes;
+            }
+            recordReceivedPieces(key, receivedIndexes, payload);
             }
             return payload;
         } catch (IOException e) {
@@ -533,8 +850,12 @@ public class Peer {
         if (fm == null) {
             String fname = keyToFilename.getOrDefault(key, key + ".part");
             long   size  = keyToSize.getOrDefault(key, (long)(maxIndex(indexes) + 1) * 1024L);
-            fm = new FileMetadata(key, "/tmp/" + fname, size, FileState.LEECH);
+          File target = new File(getPeerStorageDirectory(), fname);
+          fm = new FileMetadata(key, target.getAbsolutePath(), size, FileState.LEECH);
             managedFiles.put(key, fm);
+        } else if (fm.getState() == FileState.SEED) {
+            // Si déjà SEED, pas besoin de télécharger
+            return;
         } else {
             fm.setState(FileState.LEECH);
         }
@@ -555,6 +876,8 @@ public class Peer {
 
     private void updateBufferMapFromIndexes(FileMetadata fm, List<Integer> indexes) {
         int highestIndex = maxIndex(indexes);
+        
+        // Déterminer la taille nécessaire : max entre le nouvel index et la taille existante
         int pieceCount = Math.max(1, highestIndex + 1);
         byte[] bits = new byte[(pieceCount + 7) / 8];
 
@@ -562,7 +885,18 @@ public class Peer {
         if (currentBufferMap != null && !currentBufferMap.isEmpty()) {
             try {
                 byte[] existingBits = Base64.getDecoder().decode(currentBufferMap);
-                System.arraycopy(existingBits, 0, bits, 0, Math.min(existingBits.length, bits.length));
+                // Copier TOUS les bits existants, pas seulement Math.min()
+                int copyLength = Math.min(existingBits.length, bits.length);
+                System.arraycopy(existingBits, 0, bits, 0, copyLength);
+                
+                // Si le bitmap existant était plus grand, on ne peut rien faire
+                // Mais si notre nouveau bitmap est plus petit, c'est un problème !
+                if (existingBits.length > bits.length) {
+                    // Agrandir le bitmap pour conserver ALL les pièces existantes
+                    byte[] expandedBits = new byte[existingBits.length];
+                    System.arraycopy(existingBits, 0, expandedBits, 0, existingBits.length);
+                    bits = expandedBits;
+                }
             } catch (IllegalArgumentException ignored) {
             }
         }
@@ -570,9 +904,13 @@ public class Peer {
         for (int index : indexes) {
             int byteIndex = index / 8;
             int bitIndex = 7 - (index % 8);
-            if (byteIndex < bits.length) {
-                bits[byteIndex] |= (byte) (1 << bitIndex);
+            if (byteIndex >= bits.length) {
+                // Agrandir le bitmap si nécessaire
+                byte[] expandedBits = new byte[byteIndex + 1];
+                System.arraycopy(bits, 0, expandedBits, 0, bits.length);
+                bits = expandedBits;
             }
+            bits[byteIndex] |= (byte) (1 << bitIndex);
         }
 
         fm.setBufferMap(Base64.getEncoder().encodeToString(bits));
@@ -581,7 +919,7 @@ public class Peer {
     private void savePayloadPieces(FileMetadata fm, List<Integer> indexes, byte[] payload) {
         File targetFile = fm.getlocalPath();
         if (targetFile == null) {
-            targetFile = new File("/tmp/" + fm.getHash() + ".part");
+        targetFile = new File(getPeerStorageDirectory(), fm.getHash() + ".part");
             fm.setlocalPath(targetFile);
         }
 
@@ -642,18 +980,19 @@ public class Peer {
             String announce = buildAnnounceRequest();
             String response = sendTrackerRequest(announce);
             if (response != null && "ok".equals(response.trim())) {
-                System.out.println("Sent to tracker: " + announce.trim());
-                System.out.println("Tracker acknowledged announce!");
-                startPeriodicUpdate(10000L);
+            AppLogger.info("Sent to tracker: " + announce.trim());
+            AppLogger.info("Tracker acknowledged announce!");
+            startPeriodicUpdate(trackerUpdateIntervalMs);
+            startPeriodicPeerExchange(peerExchangeIntervalMs);
             } else {
-                System.err.println("Unexpected tracker response: " + response);
+            AppLogger.warn("Unexpected tracker response: " + response);
             }
         } catch (IOException e) {
-            System.err.println("Error reading tracker response: " + e.getMessage());
+          AppLogger.error("Error reading tracker response: " + e.getMessage());
         }
     }
 
-    private String sendTrackerRequest(String request) throws IOException {
+    public String sendTrackerRequest(String request) throws IOException {
         synchronized (trackerIoLock) {
             if (trackerOut == null || trackerIn == null) {
                 throw new IOException("tracker connection is not available");
@@ -706,10 +1045,10 @@ public class Peer {
                     try {
                         String response = sendTrackerRequest(buildUpdateRequest());
                         if (response == null || !"ok".equals(response.trim())) {
-                            System.err.println("[UPDATE] Unexpected tracker response: " + response);
+                          AppLogger.warn("[UPDATE] Unexpected tracker response: " + response);
                         }
                     } catch (IOException e) {
-                        System.err.println("[UPDATE] Stopped periodic update: " + e.getMessage());
+                        AppLogger.warn("[UPDATE] Stopped periodic update: " + e.getMessage());
                         break;
                     }
                 }

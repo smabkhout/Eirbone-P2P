@@ -19,12 +19,65 @@ void error(const char *msg) {
   exit(1);
 }
 
+static int load_port_from_config(const char *path) {
+  FILE *file = fopen(path, "r");
+  if (file == NULL) {
+    return -1;
+  }
+
+  char line[256];
+  int port = -1;
+  while (fgets(line, sizeof(line), file) != NULL) {
+    char *cursor = line;
+    while (*cursor == ' ' || *cursor == '\t') cursor++;
+    if (*cursor == '#' || *cursor == '\n' || *cursor == '\0') {
+      continue;
+    }
+
+    char *eq = strchr(cursor, '=');
+    if (eq == NULL) {
+      continue;
+    }
+
+    *eq = '\0';
+    char *key = cursor;
+    char *value = eq + 1;
+    while (*value == ' ' || *value == '\t') value++;
+
+    char *end = value + strlen(value);
+    while (end > value && (end[-1] == '\n' || end[-1] == '\r' || end[-1] == ' ' || end[-1] == '\t')) {
+      *--end = '\0';
+    }
+
+    while (*key == ' ' || *key == '\t') key++;
+    end = key + strlen(key);
+    while (end > key && (end[-1] == ' ' || end[-1] == '\t')) {
+      *--end = '\0';
+    }
+
+    if (strcmp(key, "tracker-port") == 0) {
+      port = atoi(value);
+      break;
+    }
+  }
+
+  fclose(file);
+  return port;
+}
+
 int main(int argc, char *argv[]) {
 
   tracker_t *tracker = initTracker();
 
-  if (argc < 2) {
-    fprintf(stderr, "ERROR, no port provided\n");
+  int portno = -1;
+  if (argc >= 2) {
+    portno = atoi(argv[1]);
+  } else {
+    portno = load_port_from_config("config.ini");
+  }
+
+  if (portno <= 0) {
+    fprintf(stderr, "ERROR, no valid port provided\n");
     exit(1);
   }
 
@@ -46,9 +99,6 @@ int main(int argc, char *argv[]) {
     error("ERROR opening socket");
 
   struct sockaddr_in serv_addr;
-  int portno;
-  portno = atoi(argv[1]);
-
   serv_addr.sin_family = AF_INET;
   serv_addr.sin_addr.s_addr = INADDR_ANY;
   serv_addr.sin_port = htons(portno);

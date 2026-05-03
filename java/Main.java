@@ -1,32 +1,13 @@
-import java.io.File;
-import java.io.FileInputStream;
 import java.net.ServerSocket;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Scanner;
 
 public class Main {
-  private static String md5Hex(File file) throws Exception {
-    MessageDigest md = MessageDigest.getInstance("MD5");
-    try (FileInputStream in = new FileInputStream(file)) {
-      byte[] buffer = new byte[8192];
-      int read;
-      while ((read = in.read(buffer)) != -1) {
-        md.update(buffer, 0, read);
-      }
-    }
-
-    byte[] digest = md.digest();
-    StringBuilder sb = new StringBuilder();
-    for (byte b : digest) {
-      sb.append(String.format("%02x", b));
-    }
-    return sb.toString();
-  }
-
   public static void main(String[] args) {
+    AppConfig config = AppConfig.loadDefault();
+
     System.out.println("=========================================");
     System.out.println("     Welcome to Eirbone Application      ");
     System.out.println("=========================================");
@@ -37,46 +18,31 @@ public class Main {
       autoPort = s.getLocalPort();
       s.close();
 
-      String filePath = args.length > 0 ? args[0] : "/tmp/file_a.dat";
-      File seedFile = new File(filePath);
-
-      String seedKey;
-      long seedSize;
-      if (seedFile.exists() && seedFile.isFile()) {
-        seedSize = seedFile.length();
-        seedKey = (args.length > 1) ? args[1] : md5Hex(seedFile);
-      } else {
-        seedSize = 2097152;
-        seedKey =
-            (args.length > 1) ? args[1] : "8905e92afeb80fc7722ec89eb0bf0966";
-        System.out.println("[WARN] Seed file not found: " + filePath +
-                           " (P2P getpieces may return no data)");
-      }
+      // Configure logger with per-peer log file in peer_log/ (same level as peer_data/)
+      String logPath = "peer_log/peer_" + autoPort + ".log";
+      AppLogger.configure(logPath, config.getLogLevel());
 
       Peer peer = new Peer(autoPort);
+      peer.configureIntervals(config.getTrackerUpdateIntervalMs(),
+                              config.getPeerUpdateIntervalMs());
       peer.startListening();
-      peer.registerFile(seedKey, filePath, seedSize, FileState.SEED);
-      peer.connectToTracker(
-          "127.0.0.1", 12345); // we should use the tracker's ip (from args)
+      peer.connectToTracker(config.getTrackerAddress(), config.getTrackerPort());
 
       try {
         PeerDashboard dashboard = new PeerDashboard(peer);
         int dashPort = dashboard.start();
-        System.out.println("Peer dashboard: http://localhost:" + dashPort);
+        AppLogger.info("Peer dashboard: http://localhost:" + dashPort);
         new ProcessBuilder("xdg-open", "http://localhost:" + dashPort).start();
       } catch (Exception e) {
-        System.err.println("[WARN] Could not start peer dashboard: " + e.getMessage());
+        AppLogger.warn("Could not start peer dashboard: " + e.getMessage());
       }
 
-      System.out.println("\nPeer initialized successfully!");
-      System.out.println("IP: " + peer.getIpAddress());
-      System.out.println("Assigned Random Port: " + peer.getPort());
-      System.out.println("Seed file: " + filePath);
-      System.out.println("Seed key : " + seedKey);
+      AppLogger.info("Peer initialized successfully!");
+      AppLogger.info("IP: " + peer.getIpAddress());
+      AppLogger.info("Assigned Random Port: " + peer.getPort());
+      AppLogger.info("Initial files: 0");
 
       Scanner scanner = new Scanner(System.in);
-      // System.out.println("Type 'echo <port> <hash>' to test leechFile
-      // connection (e.g. 'echo 8081 abcdef123').");
       System.out.println("Commands:");
       System.out.println("  look <filename>: search for a file on the tracker");
       System.out.println("  getfile <key>: get peers for a file");
@@ -84,6 +50,8 @@ public class Main {
           "  interested <port> <key>: ask a peer for its buffermap");
       System.out.println(
           "  getpieces <port> <key> <idx...>: request file pieces from a peer");
+        System.out.println(
+          "  getpieces <port> <key> [:]    : request all available pieces from a peer");
       System.out.println("Type 'exit' or 'q' to quit.");
 
       while (true) {
@@ -100,40 +68,53 @@ public class Main {
           break;
         } else if ("look".equalsIgnoreCase(cmd)) {
           String filename = line.length() > 5 ? line.substring(5).trim() : "";
-          peer.sendLook(filename); // to implement next
+          String res = peer.lookRaw(filename);
+          System.out.println(res == null ? "No files found." : res);
         } else if ("getfile".equalsIgnoreCase(cmd)) {
           String key = parts.length > 1 ? parts[1] : "";
-          peer.sendGetFile(key); // to implement next
+          peer.sendGetFile(key);
         } else if ("interested".equalsIgnoreCase(cmd)) {
           if (parts.length < 3) {
             System.out.println("Usage: interested <port> <key>");
             continue;
           }
 
-                    int targetPort = Integer.parseInt(parts[1]);
-                    String key = parts[2];
-                    String response = peer.requestInterested(targetPort, key);
-                    if (response == null) {
-                        System.out.println("No response");
-                    } else {
-                        System.out.println(response);
-                        System.out.println("(pieces disponibles: " + decodeBuffermapToIndexes(response) + ")");
-                    }
-                } else if ("getpieces".equalsIgnoreCase(cmd)) {
-                    if (parts.length < 4) {
-                        System.out.println("Usage: getpieces <port> <key> <idx...>");
-                        continue;
-                    }
+          int targetPort = Integer.parseInt(parts[1]);
+          String key = parts[2];
+          String response = peer.requestInterested(targetPort, key);
+          if (response == null) {
+            System.out.println("No response");
+          } else {
+            System.out.println(response);
+            System.out.println("(pieces disponibles: " + decodeBuffermapToIndexes(response) + ")");
+          }
+        } else if ("getpieces".equalsIgnoreCase(cmd)) {
+          if (parts.length < 4) {
+            System.out.println("Usage: getpieces <port> <key> <idx...>|[:]");
+            continue;
+          }
 
           int targetPort = Integer.parseInt(parts[1]);
           String key = parts[2];
           List<Integer> indexes = new ArrayList<>();
-          for (int i = 3; i < parts.length; i++) {
-            String token = parts[i].replace("[", "").replace("]", "");
-            if (token.isEmpty()) {
+          boolean allShortcut = parts.length == 4 &&
+              ("[:]".equals(parts[3]) || ":".equals(parts[3]) || "all".equalsIgnoreCase(parts[3]));
+
+          if (allShortcut) {
+            String have = peer.requestInterested(targetPort, key);
+            indexes = decodeBuffermapResponseToIndexes(have);
+            if (indexes.isEmpty()) {
+              System.out.println("No available piece for this file");
               continue;
             }
-            indexes.add(Integer.parseInt(token));
+          } else {
+            for (int i = 3; i < parts.length; i++) {
+              String token = parts[i].replace("[", "").replace("]", "");
+              if (token.isEmpty()) {
+                continue;
+              }
+              indexes.add(Integer.parseInt(token));
+            }
           }
 
           byte[] data = peer.requestPieces(targetPort, key, indexes);
@@ -148,23 +129,44 @@ public class Main {
       }
 
       scanner.close();
+      AppLogger.close();
       System.out.println("Exiting application...");
       System.exit(0);
 
-        } catch (Exception e) {
-            System.err.println("Error initializing Peer application: " + e.getMessage());
-        }
+    } catch (Exception e) {
+      AppLogger.error("Error initializing Peer application: " + e.getMessage());
+    }
     }
 
     private static String decodeBuffermapToIndexes(String response) {
+      List<Integer> indexes = decodeBuffermapResponseToIndexes(response);
+      if (indexes.isEmpty()) {
+        return "[]";
+      }
+
+      StringBuilder sb = new StringBuilder("[");
+      for (int i = 0; i < indexes.size(); i++) {
+        if (i > 0) {
+          sb.append(" ");
+        }
+        sb.append(indexes.get(i));
+      }
+      sb.append("]");
+      return sb.toString();
+    }
+
+    private static List<Integer> decodeBuffermapResponseToIndexes(String response) {
+      List<Integer> indexes = new ArrayList<>();
+      if (response == null || response.trim().isEmpty()) {
+        return indexes;
+      }
         String[] tokens = response.trim().split("\\s+", 3);
         if (tokens.length < 3 || !"have".equals(tokens[0])) {
-            return "[]";
+        return indexes;
         }
 
         try {
             byte[] buffermap = Base64.getDecoder().decode(tokens[2]);
-            List<Integer> indexes = new ArrayList<>();
 
             for (int byteIndex = 0; byteIndex < buffermap.length; byteIndex++) {
                 for (int bit = 0; bit < 8; bit++) {
@@ -174,22 +176,10 @@ public class Main {
                     }
                 }
             }
-
-            if (indexes.isEmpty()) {
-                return "[]";
-            }
-
-            StringBuilder sb = new StringBuilder("[");
-            for (int i = 0; i < indexes.size(); i++) {
-                if (i > 0) {
-                    sb.append(" ");
-                }
-                sb.append(indexes.get(i));
-            }
-            sb.append("]");
-            return sb.toString();
         } catch (IllegalArgumentException e) {
-            return "invalid buffermap";
+                return new ArrayList<>();
         }
+
+              return indexes;
     }
 }
