@@ -7,7 +7,6 @@ import java.util.Scanner;
 public class Main {
   public static void main(String[] args) {
     AppConfig config = AppConfig.loadDefault();
-    AppLogger.configure(config.getLogFile(), config.getLogLevel());
 
     System.out.println("=========================================");
     System.out.println("     Welcome to Eirbone Application      ");
@@ -18,6 +17,10 @@ public class Main {
       ServerSocket s = new ServerSocket(0);
       autoPort = s.getLocalPort();
       s.close();
+
+      // Configure logger with per-peer log file in peer_log/ (same level as peer_data/)
+      String logPath = "peer_log/peer_" + autoPort + ".log";
+      AppLogger.configure(logPath, config.getLogLevel());
 
       Peer peer = new Peer(autoPort);
       peer.configureIntervals(config.getTrackerUpdateIntervalMs(),
