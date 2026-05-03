@@ -4,7 +4,8 @@
 # Build folders
 build/
 java/bin/
-java/peer_data/*
+java/peer_data/
+java/peer_log/
 
 # Generated binaries
 tracker_server
