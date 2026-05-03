@@ -6,6 +6,9 @@ import java.util.Scanner;
 
 public class Main {
   public static void main(String[] args) {
+    AppConfig config = AppConfig.loadDefault();
+    AppLogger.configure(config.getLogFile(), config.getLogLevel());
+
     System.out.println("=========================================");
     System.out.println("     Welcome to Eirbone Application      ");
     System.out.println("=========================================");
@@ -17,27 +20,26 @@ public class Main {
       s.close();
 
       Peer peer = new Peer(autoPort);
+      peer.configureIntervals(config.getTrackerUpdateIntervalMs(),
+                              config.getPeerUpdateIntervalMs());
       peer.startListening();
-      peer.connectToTracker(
-          "127.0.0.1", 12345); // we should use the tracker's ip (from args)
+      peer.connectToTracker(config.getTrackerAddress(), config.getTrackerPort());
 
       try {
         PeerDashboard dashboard = new PeerDashboard(peer);
         int dashPort = dashboard.start();
-        System.out.println("Peer dashboard: http://localhost:" + dashPort);
+        AppLogger.info("Peer dashboard: http://localhost:" + dashPort);
         new ProcessBuilder("xdg-open", "http://localhost:" + dashPort).start();
       } catch (Exception e) {
-        System.err.println("[WARN] Could not start peer dashboard: " + e.getMessage());
+        AppLogger.warn("Could not start peer dashboard: " + e.getMessage());
       }
 
-      System.out.println("\nPeer initialized successfully!");
-      System.out.println("IP: " + peer.getIpAddress());
-      System.out.println("Assigned Random Port: " + peer.getPort());
-      System.out.println("Initial files: 0");
+      AppLogger.info("Peer initialized successfully!");
+      AppLogger.info("IP: " + peer.getIpAddress());
+      AppLogger.info("Assigned Random Port: " + peer.getPort());
+      AppLogger.info("Initial files: 0");
 
       Scanner scanner = new Scanner(System.in);
-      // System.out.println("Type 'echo <port> <hash>' to test leechFile
-      // connection (e.g. 'echo 8081 abcdef123').");
       System.out.println("Commands:");
       System.out.println("  look <filename>: search for a file on the tracker");
       System.out.println("  getfile <key>: get peers for a file");
@@ -67,27 +69,27 @@ public class Main {
           System.out.println(res == null ? "No files found." : res);
         } else if ("getfile".equalsIgnoreCase(cmd)) {
           String key = parts.length > 1 ? parts[1] : "";
-          peer.sendGetFile(key); // to implement next
+          peer.sendGetFile(key);
         } else if ("interested".equalsIgnoreCase(cmd)) {
           if (parts.length < 3) {
             System.out.println("Usage: interested <port> <key>");
             continue;
           }
 
-                    int targetPort = Integer.parseInt(parts[1]);
-                    String key = parts[2];
-                    String response = peer.requestInterested(targetPort, key);
-                    if (response == null) {
-                        System.out.println("No response");
-                    } else {
-                        System.out.println(response);
-                        System.out.println("(pieces disponibles: " + decodeBuffermapToIndexes(response) + ")");
-                    }
-                } else if ("getpieces".equalsIgnoreCase(cmd)) {
-                    if (parts.length < 4) {
-                        System.out.println("Usage: getpieces <port> <key> <idx...>|[:]");
-                        continue;
-                    }
+          int targetPort = Integer.parseInt(parts[1]);
+          String key = parts[2];
+          String response = peer.requestInterested(targetPort, key);
+          if (response == null) {
+            System.out.println("No response");
+          } else {
+            System.out.println(response);
+            System.out.println("(pieces disponibles: " + decodeBuffermapToIndexes(response) + ")");
+          }
+        } else if ("getpieces".equalsIgnoreCase(cmd)) {
+          if (parts.length < 4) {
+            System.out.println("Usage: getpieces <port> <key> <idx...>|[:]");
+            continue;
+          }
 
           int targetPort = Integer.parseInt(parts[1]);
           String key = parts[2];
@@ -124,12 +126,13 @@ public class Main {
       }
 
       scanner.close();
+      AppLogger.close();
       System.out.println("Exiting application...");
       System.exit(0);
 
-        } catch (Exception e) {
-            System.err.println("Error initializing Peer application: " + e.getMessage());
-        }
+    } catch (Exception e) {
+      AppLogger.error("Error initializing Peer application: " + e.getMessage());
+    }
     }
 
     private static String decodeBuffermapToIndexes(String response) {
