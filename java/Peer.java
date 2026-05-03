@@ -662,6 +662,9 @@ public class Peer {
           File target = new File(getPeerStorageDirectory(), fname);
           fm = new FileMetadata(key, target.getAbsolutePath(), size, FileState.LEECH);
             managedFiles.put(key, fm);
+        } else if (fm.getState() == FileState.SEED) {
+            // Si déjà SEED, pas besoin de télécharger
+            return;
         } else {
             fm.setState(FileState.LEECH);
         }
@@ -682,6 +685,8 @@ public class Peer {
 
     private void updateBufferMapFromIndexes(FileMetadata fm, List<Integer> indexes) {
         int highestIndex = maxIndex(indexes);
+        
+        // Déterminer la taille nécessaire : max entre le nouvel index et la taille existante
         int pieceCount = Math.max(1, highestIndex + 1);
         byte[] bits = new byte[(pieceCount + 7) / 8];
 
@@ -689,7 +694,18 @@ public class Peer {
         if (currentBufferMap != null && !currentBufferMap.isEmpty()) {
             try {
                 byte[] existingBits = Base64.getDecoder().decode(currentBufferMap);
-                System.arraycopy(existingBits, 0, bits, 0, Math.min(existingBits.length, bits.length));
+                // Copier TOUS les bits existants, pas seulement Math.min()
+                int copyLength = Math.min(existingBits.length, bits.length);
+                System.arraycopy(existingBits, 0, bits, 0, copyLength);
+                
+                // Si le bitmap existant était plus grand, on ne peut rien faire
+                // Mais si notre nouveau bitmap est plus petit, c'est un problème !
+                if (existingBits.length > bits.length) {
+                    // Agrandir le bitmap pour conserver ALL les pièces existantes
+                    byte[] expandedBits = new byte[existingBits.length];
+                    System.arraycopy(existingBits, 0, expandedBits, 0, existingBits.length);
+                    bits = expandedBits;
+                }
             } catch (IllegalArgumentException ignored) {
             }
         }
@@ -697,9 +713,13 @@ public class Peer {
         for (int index : indexes) {
             int byteIndex = index / 8;
             int bitIndex = 7 - (index % 8);
-            if (byteIndex < bits.length) {
-                bits[byteIndex] |= (byte) (1 << bitIndex);
+            if (byteIndex >= bits.length) {
+                // Agrandir le bitmap si nécessaire
+                byte[] expandedBits = new byte[byteIndex + 1];
+                System.arraycopy(bits, 0, expandedBits, 0, bits.length);
+                bits = expandedBits;
             }
+            bits[byteIndex] |= (byte) (1 << bitIndex);
         }
 
         fm.setBufferMap(Base64.getEncoder().encodeToString(bits));
