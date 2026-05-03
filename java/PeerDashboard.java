@@ -30,6 +30,7 @@ public class PeerDashboard {
         server.createContext("/api/look",       this::handleLook);
         server.createContext("/api/getfile",    this::handleGetFile);
         server.createContext("/api/download",   this::handleDownload);
+        server.createContext("/api/seed",       this::handleSeedUpload);
         server.createContext("/api/interested", this::handleInterested);
         server.createContext("/api/getpieces",  this::handleGetPieces);
         server.createContext("/",               this::handleStatic);
@@ -123,6 +124,49 @@ public class PeerDashboard {
             } catch (NumberFormatException ignored) {}
         }
         sendJson(ex, json);
+    }
+
+    /* ── /api/seed?name=<filename>&path=<target> ───────────────────────── */
+
+    private void handleSeedUpload(HttpExchange ex) throws IOException {
+        if (!"post".equalsIgnoreCase(ex.getRequestMethod())) {
+            sendJson(ex, "{\"status\":\"error\"}");
+            return;
+        }
+
+        Map<String, String> params = parseQuery(ex.getRequestURI().getQuery());
+        String name = params.getOrDefault("name", "").trim();
+        // Ignore any path provided by the user, always store in peer's directory
+        if (name.isEmpty()) {
+            sendJson(ex, "{\"status\":\"error\",\"message\":\"missing filename\"}");
+            return;
+        }
+
+        byte[] content = ex.getRequestBody().readAllBytes();
+        if (content.length == 0) {
+            sendJson(ex, "{\"status\":\"error\",\"message\":\"empty file\"}");
+            return;
+        }
+
+        try {
+            FileMetadata fm = peer.addSeedFile(name, null, content);
+            // Envoie un announce pour que le tracker connaisse le nouveau fichier
+            if (peer != null) {
+                String announceReq = peer.buildAnnounceRequest();
+                System.out.println("Annonce envoyée au tracker pour le fichier ajouté.");
+                peer.sendTrackerRequest(announceReq);
+            }
+            peer.refreshTrackerNow();
+            StringBuilder sb = new StringBuilder();
+            sb.append("{\"status\":\"started\"");
+            sb.append(",\"filename\":\"").append(escJson(fm.getFileName())).append("\"");
+            sb.append(",\"md5\":\"").append(fm.getHash()).append("\"");
+            sb.append(",\"size\":").append(fm.getSize());
+            sb.append(",\"path\":\"").append(escJson(fm.getlocalPath().getAbsolutePath())).append("\"}");
+            sendJson(ex, sb.toString());
+        } catch (IllegalArgumentException e) {
+            sendJson(ex, "{\"status\":\"error\",\"message\":\"invalid file\"}");
+        }
     }
 
     /* ── /api/interested?key=<md5>&port=<n> ────────────────────────────── */

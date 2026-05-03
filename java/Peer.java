@@ -1,6 +1,7 @@
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -275,6 +276,24 @@ public class Peer {
     return total;
   }
 
+  private List<Integer> extractDataIndexes(String header) {
+    List<Integer> indexes = new ArrayList<>();
+    int start = header.indexOf('[');
+    int end = header.indexOf(']');
+    if (start < 0 || end < 0 || end <= start)
+      return indexes;
+
+    String[] tokens = header.substring(start + 1, end).trim().split("\\s+");
+    // Format: [index size index size ...]
+    for (int i = 0; i + 1 < tokens.length; i += 2) {
+      try {
+        indexes.add(Integer.parseInt(tokens[i]));
+      } catch (NumberFormatException ignored) {
+      }
+    }
+    return indexes;
+  }
+
   private byte[] readExactBytes(BufferedInputStream in, int length)
       throws IOException {
     byte[] buffer = new byte[length];
@@ -293,6 +312,107 @@ public class Peer {
     FileMetadata fm = new FileMetadata(MD5hash, path, size);
     fm.setState(state);
     this.managedFiles.put(MD5hash, fm);
+    keyToFilename.putIfAbsent(MD5hash, fm.getFileName());
+    keyToSize.putIfAbsent(MD5hash, size);
+  }
+
+  public synchronized FileMetadata addSeedFile(String originalName,
+                                               String targetPath,
+                                               byte[] content)
+      throws IOException {
+    if (content == null) {
+      throw new IllegalArgumentException("content cannot be null");
+    }
+
+    String safeName = originalName == null || originalName.trim().isEmpty()
+        ? "shared-file.bin"
+        : new File(originalName).getName();
+    File targetFile = resolvePathInPeerDirectory(targetPath, safeName);
+    File parent = targetFile.getParentFile();
+    if (parent != null && !parent.exists()) {
+      parent.mkdirs();
+    }
+
+    try (FileOutputStream out = new FileOutputStream(targetFile)) {
+      out.write(content);
+    }
+
+    String hash = md5Hex(content);
+    FileMetadata fm = new FileMetadata(hash, targetFile.getAbsolutePath(),
+                                       content.length, FileState.SEED);
+    managedFiles.put(hash, fm);
+    keyToFilename.put(hash, fm.getFileName());
+    keyToSize.put(hash, (long)content.length);
+    return fm;
+  }
+
+  private File getPeerStorageDirectory() {
+    File dir = new File("peer_data", "peer_" + this.port);
+    if (!dir.exists()) {
+      dir.mkdirs();
+    }
+    return dir;
+  }
+
+  private File resolvePathInPeerDirectory(String requestedPath,
+                                          String defaultFileName)
+      throws IOException {
+    File baseDir = getPeerStorageDirectory();
+
+    File target;
+    if (requestedPath == null || requestedPath.trim().isEmpty()) {
+      target = new File(baseDir, defaultFileName);
+    } else {
+      String raw = requestedPath.trim().replace('\\', '/');
+      while (raw.startsWith("/")) {
+        raw = raw.substring(1);
+      }
+      if (raw.isEmpty()) {
+        raw = defaultFileName;
+      }
+
+      File candidate = new File(baseDir, raw);
+      boolean asDirectory = requestedPath.endsWith("/") ||
+                            requestedPath.endsWith("\\") ||
+                            (candidate.exists() && candidate.isDirectory());
+      target = asDirectory ? new File(candidate, defaultFileName) : candidate;
+    }
+
+    String baseCanonical = baseDir.getCanonicalPath();
+    String targetCanonical = target.getCanonicalPath();
+    if (!targetCanonical.equals(baseCanonical) &&
+        !targetCanonical.startsWith(baseCanonical + File.separator)) {
+      throw new IllegalArgumentException(
+          "Path must stay inside peer storage directory");
+    }
+
+    return target;
+  }
+
+  private String md5Hex(byte[] content) {
+    try {
+      MessageDigest md = MessageDigest.getInstance("MD5");
+      byte[] digest = md.digest(content);
+      StringBuilder sb = new StringBuilder();
+      for (byte b : digest) {
+        sb.append(String.format("%02x", b));
+      }
+      return sb.toString();
+    } catch (Exception e) {
+      throw new RuntimeException("Unable to compute MD5", e);
+    }
+  }
+
+  public void refreshTrackerNow() {
+    try {
+      if (trackerOut == null || trackerIn == null) {
+        return;
+      }
+      String updateReq = buildUpdateRequest();
+      sendTrackerRequest(updateReq);
+    } catch (IOException e) {
+      System.err.println("[UPDATE] Unable to refresh tracker: " + e.getMessage());
+    }
   }
 
   public String getIpAddress() { return ip; }
@@ -367,7 +487,8 @@ public class Peer {
       if (managedFiles.containsKey(key)) return;
       String fname = keyToFilename.getOrDefault(key, key + ".part");
       long   size  = keyToSize.getOrDefault(key, 0L);
-      FileMetadata fm = new FileMetadata(key, "/tmp/" + fname, size, FileState.LEECH);
+      File target = new File(getPeerStorageDirectory(), fname);
+      FileMetadata fm = new FileMetadata(key, target.getAbsolutePath(), size, FileState.LEECH);
       managedFiles.put(key, fm);
   }
 
@@ -515,7 +636,12 @@ public class Peer {
             int payloadSize = extractTotalPayloadSize(header);
             byte[] payload = readExactBytes(in, payloadSize);
             if (payload != null) {
-                recordReceivedPieces(key, indexes, payload);
+            List<Integer> receivedIndexes = extractDataIndexes(header);
+            if (receivedIndexes.isEmpty()) {
+              // Fallback for malformed/legacy headers.
+              receivedIndexes = indexes;
+            }
+            recordReceivedPieces(key, receivedIndexes, payload);
             }
             return payload;
         } catch (IOException e) {
@@ -533,7 +659,8 @@ public class Peer {
         if (fm == null) {
             String fname = keyToFilename.getOrDefault(key, key + ".part");
             long   size  = keyToSize.getOrDefault(key, (long)(maxIndex(indexes) + 1) * 1024L);
-            fm = new FileMetadata(key, "/tmp/" + fname, size, FileState.LEECH);
+          File target = new File(getPeerStorageDirectory(), fname);
+          fm = new FileMetadata(key, target.getAbsolutePath(), size, FileState.LEECH);
             managedFiles.put(key, fm);
         } else {
             fm.setState(FileState.LEECH);
@@ -581,7 +708,7 @@ public class Peer {
     private void savePayloadPieces(FileMetadata fm, List<Integer> indexes, byte[] payload) {
         File targetFile = fm.getlocalPath();
         if (targetFile == null) {
-            targetFile = new File("/tmp/" + fm.getHash() + ".part");
+        targetFile = new File(getPeerStorageDirectory(), fm.getHash() + ".part");
             fm.setlocalPath(targetFile);
         }
 
@@ -653,7 +780,7 @@ public class Peer {
         }
     }
 
-    private String sendTrackerRequest(String request) throws IOException {
+    public String sendTrackerRequest(String request) throws IOException {
         synchronized (trackerIoLock) {
             if (trackerOut == null || trackerIn == null) {
                 throw new IOException("tracker connection is not available");
