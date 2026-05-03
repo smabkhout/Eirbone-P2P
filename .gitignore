@@ -6,6 +6,7 @@ build/
 java/bin/
 java/peer_data/
 java/peer_log/
+testfiles/
 
 # Generated binaries
 tracker_server
